@@ -1,0 +1,13 @@
+# Core runtime — pure-Python, runs offline with zero model downloads.
+pydantic>=2.6
+rank-bm25>=0.2.2
+numpy>=1.26
+pyyaml>=6.0
+fastapi>=0.110
+uvicorn>=0.29
+
+# --- Optional production backends (uncomment to enable swaps) ---
+# anthropic>=0.39           # Contextual Retrieval enrichment + Claude generation
+# qdrant-client>=1.9        # production vector store
+# sentence-transformers>=3  # dense bi-encoder + cross-encoder reranker
+# psycopg[binary]>=3.1      # pgvector store
