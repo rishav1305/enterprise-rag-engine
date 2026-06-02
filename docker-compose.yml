@@ -1,0 +1,22 @@
+# Local orchestration. The engine runs standalone out of the box; the optional
+# services below are wired in only when you flip the corresponding backend.
+services:
+  rag-api:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      - RAG_CONTEXTUALIZER=${RAG_CONTEXTUALIZER:-local}
+      - RAG_GENERATOR=${RAG_GENERATOR:-extractive}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    # depends_on: [qdrant, redis]   # enable when using production backends
+
+  # --- Optional production backends ---------------------------------
+  qdrant:                     # dense vector store (QdrantVectorStore)
+    image: qdrant/qdrant:latest
+    profiles: ["full"]
+    ports: ["6333:6333"]
+
+  redis:                      # ACL / session cache for permission lookups
+    image: redis:7-alpine
+    profiles: ["full"]
+    ports: ["6379:6379"]
