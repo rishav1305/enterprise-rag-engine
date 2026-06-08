@@ -48,3 +48,47 @@ def test_governance_decision_supports_partial():
                            reason="scoped", scope="own_component")
     assert d.decision == "partial"
     assert d.scope == "own_component"
+
+
+# ---- Task 6: class-aware access (allow/mask/deny + non-monotonic) -------
+def _chunk(cls, roles, level, ntk=None, meta=None):
+    from rag_engine.schemas import EnrichedChunk, SecurityContext
+    return EnrichedChunk(
+        chunk_id="c1", parent_doc_id=f"asset-{cls}", parent_title="t", content="x",
+        security=SecurityContext(allowed_roles=roles, clearance_level=level,
+                                 sensitivity_class=cls,
+                                 need_to_know_roles=ntk if ntk is not None else roles),
+        metadata=meta or {},
+    )
+
+
+def _sess(roles, level):
+    from rag_engine.schemas import Session
+    return Session(user_id="u", roles=roles, clearance_level=level)
+
+
+def test_access_masks_customer_pii_for_analyst():
+    from rag_engine.governance.access import evaluate
+    chunk = _chunk("D", ["EMPLOYEE"], 3)
+    analyst = _sess(["MARKETING_ANALYST", "EMPLOYEE"], 2)
+    assert evaluate(chunk, analyst).decision == "mask"
+    intern = _sess(["INTERN", "EMPLOYEE"], 1)
+    assert evaluate(chunk, intern).decision == "deny"
+    director = _sess(["FINANCE", "EMPLOYEE"], 4)
+    assert evaluate(chunk, director).decision == "allow"  # raw at L4+
+
+
+def test_access_non_monotonic_finance_manager_class_F():
+    from rag_engine.governance.access import evaluate
+    chunk = _chunk("F", ["C_SUITE"], 5, ntk=["C_SUITE"])
+    fm = _sess(["FINANCE", "FINANCE_MANAGER", "EMPLOYEE"], 4)
+    assert evaluate(chunk, fm).decision == "deny"  # high level, wrong need-to-know
+
+
+def test_access_finance_manager_sees_class_E():
+    from rag_engine.governance.access import evaluate
+    chunk = _chunk("E", ["FINANCE", "C_SUITE"], 4, ntk=["FINANCE", "C_SUITE"])
+    fm = _sess(["FINANCE", "FINANCE_MANAGER", "EMPLOYEE"], 4)
+    assert evaluate(chunk, fm).decision == "allow"
+    legal = _sess(["LEGAL", "EMPLOYEE"], 4)
+    assert evaluate(chunk, legal).decision == "deny"  # L4 but no FINANCE need-to-know
