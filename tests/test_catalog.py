@@ -39,3 +39,17 @@ def test_seed_connector_yields_catalog_assets():
     hr = next(a for a in assets if a.asset_id == "hr_records")
     assert hr.sensitivity_class == "F"
     assert "salary" in hr.masked_columns()
+
+
+def test_registry_loads_and_queries_by_vertical_and_class():
+    from rag_engine.catalog.connector import SeedConnector
+    from rag_engine.catalog.registry import CatalogRegistry
+    reg = CatalogRegistry()
+    n = reg.load(SeedConnector(scale=0.01))
+    assert n == 25
+    assert reg.get("hr_records").sensitivity_class == "F"
+    finance = reg.by_vertical("FINANCE")
+    assert {a.asset_id for a in finance} >= {"prerelease_financials", "payments_ledger"}
+    e_class = reg.by_class("E")
+    assert all(a.sensitivity_class == "E" for a in e_class)
+    assert {a.asset_id for a in e_class} == {"prerelease_financials"}
