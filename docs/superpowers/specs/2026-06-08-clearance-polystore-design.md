@@ -144,6 +144,51 @@ The expensive work is **build-time batch, not serve-time** — it runs on-demand
 
 **Artifact flow:** the batch writes chunk text + ACLs + graph + catalog + glossary into **SurrealDB Cloud** (managed, always-up) and emits the **TurboVec index as a file** (`index.tvq`, ≈384 B/vec → ~19 MB for 50k chunks). The index ships in the function bundle or **Vercel Blob**; the serverless function loads it on cold start. **Serving (per query) touches only hosted services** — Vercel + SurrealDB Cloud + Cohere rerank + Groq generate + BigQuery — so nothing of yours stays online. titan is *optional*: a convenient batch host, or a future home for local embeddings (TEI + bge-m3) / self-hosted stores if free tiers are outgrown.
 
+### 3.5 The demo org & data story — "Meridian" (locked 2026-06-08)
+
+Every dataset is justified by one fictional org, reverse-engineered to fit the real public sources so the demo *makes sense*.
+
+**Meridian** — "the everything app for cities": a global **super-app + marketplace** (~12,000 employees, multi-region) running **ride-hailing/logistics**, an **online marketplace/retail** arm, **fintech/payments**, **ads/growth**, and a **corporate strategy** function. It grew by **acquisition** — which is *why* its warehouse has meaningless column names and its data sprawls across systems. A super-app is the one org type that naturally produces all of: trips, retail transactions, payments, ads, plus heavy external-signal monitoring — and it makes all three hero demos land (PB funnel over trips/sales; opaque-schema glossary over the acquired retailer's warehouse; need-to-know governance across Finance/HR/Legal/Security).
+
+**Org structure → personas → clearance (0=public … 5=board):**
+
+| Vertical | Owns | Personas (clearance) |
+|---|---|---|
+| Finance | revenue by segment, **pre-release financials** | Finance Manager (L4), CFO (L5) |
+| People/HR | Workday HRIS, **exec comp**, headcount | HR Analyst (L2); comp visible only L5 |
+| Sales | Salesforce pipeline, contracts, deal value | Sales Manager (L3) |
+| Legal & Compliance | contracts, **M&A**, litigation | Legal Counsel (L4) |
+| Engineering / Data Platform | the warehouse, runbooks, prod creds | Engineer (L2) |
+| Mobility Ops | trip records, driver/rider PII | Ops Analyst (L2) |
+| Marketplace/Commerce | sales transactions, merchant + customer data | Commerce Analyst (L2) |
+| Marketing/Growth | campaigns, ad spend, market signals | Marketing Analyst (L2) |
+| Risk & Security | incidents, threat intel, audit logs | CISO (L4) |
+| Strategy/Intelligence | competitor filings, M&A targets | Strategist (L4) |
+| Knowledge/Support | internal wiki, support threads | Support Agent (L1), Intern (L1) |
+
+Gives a deliberately **non-monotonic** access matrix (Finance sees financials not comp; HR sees comp not financials; Legal sees neither; CEO/CFO see both) — what makes the leak audit non-trivial.
+
+**Data estate — in-story asset → real public source → connector → vertical → sensitivity:**
+
+| In-story asset | Real public source | Connector | Vertical | Clearance / masking |
+|---|---|---|---|---|
+| Marketplace transactions | **TPC-DS** `store_sales` | Warehouse | Commerce/Finance | `customer_email` masked; raw L3, aggregates L1 |
+| Mobility trips (~1.6B rows) | **NYC TLC** (BigQuery public) | Data lake | Mobility Ops | pickup/dropoff coords masked (PII); aggregates L1 |
+| Global events / risk signals | **GDELT** (BigQuery public) | Data-share | Strategy/Marketing | L1 |
+| Web/competitor corpus | **Common Crawl** (AWS S3) | S3 object store | Strategy | **catalog-only** (PB tail), L1 |
+| Company filings (due diligence) | **SEC EDGAR** | Files/API | Strategy/Legal | public L0 |
+| Open city/economic data | **data.gov** | Files/API | Ops/Marketing | public L0 |
+| Internal knowledge base | **Wikipedia/Wikimedia** dump | Confluence/wiki | Knowledge | L0–L1 (vector KB) |
+| HR records + **exec comp** | *synthetic* (Workday) | HRIS | People | comp L5; policy L1 |
+| CRM pipeline | *synthetic* (Salesforce) | CRM | Sales | field-level security on deal value |
+| Internal comms | *synthetic* (Slack) | Messages | all | channel-scoped |
+| **Pre-release financials** | *synthetic* (derived from TPC-DS aggregates) | Drive/warehouse | Finance | L5 |
+| **M&A / litigation memos** | *synthetic* | Drive | Legal | L5 |
+
+Where no true public dataset exists (HR comp, CRM, Slack, M&A), use **clearly-labeled synthetic** data — honest, and where the sharpest governance scenarios live.
+
+**The narrative (what a visitor experiences):** Meridian is a super-app drowning in data — PB of trips/transactions in an acquired warehouse with meaningless column names, billions of event/web records too big to ingest, and sensitive HR/Finance/Legal material across Slack/Drive/Confluence/Salesforce/Workday. The visitor **picks a persona**, asks a question, and watches: router picks a backend → funnel collapses PB→thousands → text-to-SQL translates `text_2` via the glossary → retrieval → **governance drops what that persona can't see** → cited answer + audit trail. **Headline scene:** an **Intern** asks *"what are our Q3 projections and exec salaries?"* → restricted rows/chunks dropped + audited; the **CFO** asks the same and gets them. Same index, different session token.
+
 ---
 
 ## 4. Governance model (extended across backends)
