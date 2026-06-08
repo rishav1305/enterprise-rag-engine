@@ -142,3 +142,48 @@ def test_non_partial_session_still_denied():
     )
     analyst = _sess(["DATA_ANALYST", "EMPLOYEE"], 2)
     assert evaluate(chunk, analyst).decision == "deny"
+
+
+# ---- Task 8: filter admits mask/partial, drops only deny ----------------
+def test_filter_admits_masked_chunk_not_dropped():
+    from rag_engine.governance.filter import SecurityFilter
+    from rag_engine.schemas import ScoredChunk
+    pii = ScoredChunk(chunk=_chunk("D", ["EMPLOYEE"], 3), score=1.0)
+    analyst = _sess(["MARKETING_ANALYST", "EMPLOYEE"], 2)
+    admitted, trail = SecurityFilter().apply([pii], analyst)
+    assert len(admitted) == 1            # masked chunk ADMITTED, not dropped
+    assert trail[0].decision == "mask"
+
+
+def test_filter_admits_partial_chunk():
+    from rag_engine.governance.filter import SecurityFilter
+    from rag_engine.schemas import ScoredChunk
+    h = ScoredChunk(chunk=_chunk("H", ["CISO", "SECURITY", "BOARD", "ENGINEER"], 2,
+                                 ntk=["CISO", "SECURITY", "BOARD"],
+                                 meta={"partial_for": ["ENGINEER"]}), score=1.0)
+    eng = _sess(["ENGINEER", "EMPLOYEE"], 2)
+    admitted, trail = SecurityFilter().apply([h], eng)
+    assert len(admitted) == 1
+    assert trail[0].decision == "partial"
+
+
+def test_filter_drops_only_deny():
+    from rag_engine.governance.filter import SecurityFilter
+    from rag_engine.schemas import ScoredChunk
+    allow_c = ScoredChunk(chunk=_chunk("B", ["EMPLOYEE"], 1), score=1.0)
+    deny_c = ScoredChunk(chunk=_chunk("F", ["C_SUITE"], 5, ntk=["C_SUITE"]), score=1.0)
+    mask_c = ScoredChunk(chunk=_chunk("D", ["EMPLOYEE"], 3), score=1.0)
+    sess = _sess(["MARKETING_ANALYST", "EMPLOYEE"], 2)
+    admitted, trail = SecurityFilter().apply([allow_c, deny_c, mask_c], sess)
+    decisions = [d.decision for d in trail]
+    assert decisions == ["allow", "deny", "mask"]
+    assert len(admitted) == 2  # allow + mask admitted; deny dropped
+
+
+def test_filter_carries_mask_reason_in_trail():
+    from rag_engine.governance.filter import SecurityFilter
+    from rag_engine.schemas import ScoredChunk
+    pii = ScoredChunk(chunk=_chunk("D", ["EMPLOYEE"], 3), score=1.0)
+    analyst = _sess(["MARKETING_ANALYST", "EMPLOYEE"], 2)
+    _, trail = SecurityFilter().apply([pii], analyst)
+    assert trail[0].mask_reason == "pii_mask"
