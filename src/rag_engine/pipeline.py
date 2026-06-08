@@ -15,8 +15,12 @@ and no code change.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .config import EngineConfig
+
+if TYPE_CHECKING:
+    from .catalog.registry import CatalogRegistry
 from .enrichment.base import Contextualizer
 from .enrichment.local import LocalHeuristicContextualizer
 from .generation.base import Generator
@@ -53,6 +57,7 @@ class RAGPipeline:
         retriever: HybridRetriever | None = None,
         contextualizer: Contextualizer | None = None,
         generator: Generator | None = None,
+        catalog: "CatalogRegistry | None" = None,
     ) -> None:
         self.config = config or EngineConfig()
         self.router = HeuristicRouter()
@@ -61,7 +66,19 @@ class RAGPipeline:
         self.security = SecurityFilter()
         self.generator = generator or _build_generator(self.config)
         self.audit = AuditLog()
+        # Catalog of asset/column policy (P0.1b). Optional: when present, the
+        # pipeline can resolve a chunk's governing CatalogAsset by parent_doc_id.
+        self.catalog: "CatalogRegistry | None" = catalog
         self._chunks: list[EnrichedChunk] = []
+
+    def asset_for(self, parent_doc_id: str):
+        """Resolve the governing CatalogAsset for a chunk's source, if cataloged."""
+        if self.catalog is None:
+            return None
+        try:
+            return self.catalog.get(parent_doc_id)
+        except KeyError:
+            return None
 
     # ---- indexing -----------------------------------------------------
     def index_documents(self, docs: list[Document]) -> int:

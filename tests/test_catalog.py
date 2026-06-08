@@ -53,3 +53,21 @@ def test_registry_loads_and_queries_by_vertical_and_class():
     e_class = reg.by_class("E")
     assert all(a.sensitivity_class == "E" for a in e_class)
     assert {a.asset_id for a in e_class} == {"prerelease_financials"}
+
+
+def test_pipeline_accepts_catalog_registry():
+    from rag_engine import RAGPipeline
+    from rag_engine.catalog.connector import SeedConnector
+    from rag_engine.catalog.registry import CatalogRegistry
+    reg = CatalogRegistry()
+    reg.load(SeedConnector(scale=0.01))
+    p = RAGPipeline(catalog=reg)
+    assert p.catalog is reg
+    assert p.catalog.get("hr_records").sensitivity_class == "F"
+
+
+def test_pipeline_catalog_is_optional():
+    # backward compat: pipeline still constructs with no catalog
+    from rag_engine import RAGPipeline
+    p = RAGPipeline()
+    assert p.catalog is None
