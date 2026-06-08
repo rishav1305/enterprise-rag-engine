@@ -69,6 +69,7 @@ A `SecurityContext` (frozen Pydantic model in the engine) carries `allowed_roles
 | **Finance Manager** | Finance | L4 | financials — **not** comp |
 | **Legal Counsel** | Legal | L4 | contracts, M&A — **not** financials/comp |
 | **CISO** | Risk & Security | L4 | security incidents, audit logs |
+| **Strategist** | Strategy/Intelligence | L4 | competitive intel + **M&A targets** — allowed G where Sales is denied (golden scenario #6) |
 | **CFO** | Finance / C-suite | L5 | financials **and** comp **and** M&A |
 | **CEO** | C-suite | L5 | everything |
 
@@ -88,6 +89,7 @@ Asset sensitivity classes: **A** Public (L0) · **B** Employee-general (L1) · *
 | Sales Manager | ✓ | ✓ | ✓ | ✓ (raw) | ✗ | ✗ | ✗ | ✗ |
 | Finance Manager | ✓ | ✓ | ✓ | ✓ | ✓ | **✗** | ✗ | ✗ |
 | Legal Counsel | ✓ | ✓ | ✓ | ✓ | **✗** | **✗** | ✓ | ✗ |
+| Strategist | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | **✓** | ✗ |
 | CISO | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✓ |
 | CFO | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |
 | CEO | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -126,8 +128,14 @@ All synthetic data is **clearly labeled** in the UI and **deterministically gene
 | **Payments ledger + KYC** | Warehouse / payments DB | Finance/Risk | Structured + masking | ~5M transactions, ~200k KYC identities | txn_id, amount, merchant, **kyc: name/dob/gov_id (masked)** | KYC PII **masked**, raw L4; aggregates L1 |
 | **Customer support tickets + transcripts** | Zendesk / Slack | Support | Vector + lexical | ~30k tickets + transcripts | ticket_id, customer_ref, transcript, resolution | customer PII **masked**; L1 |
 | **App/service telemetry logs** | Data lake | Engineering/Ops | **funnel tier-out** (mostly NOT indexed) | ~200M log lines | ts, service, level, trace_id, msg | L2; demonstrates dedup/tiering |
+| **Payroll runs** | HRIS (Workday) | People | Structured + masking | ~12k employees × ~30 periods | employee_id, period, gross, net, deductions, **bank_acct (masked)** | **L5** (ties to comp); bank PII masked |
+| **Benefits enrollments** | HRIS (Workday) | People | Structured + vector | ~12k employees | employee_id, plan, dependents, **health elections (masked)** | L4; health PII masked |
+| **Recruiting / ATS** | ATS (Greenhouse) | People | Vector + structured | ~25k candidates, ~3k reqs | candidate, req, stage, **interview notes, comp ask** | L3; candidate PII masked; offers L4 |
+| **Expenses / AP** | Finance (Concur/ERP) | Finance | Structured | ~150k expense lines | employee_id, vendor, amount, category, receipt_ref | L2; aggregates L1 |
+| **Tax filings / provisions** | Finance / Drive | Finance | Vector + structured | ~8 quarters × jurisdictions | jurisdiction, period, provision, status=draft | **L5** (pre-release) |
+| **Treasury / cash positions** | Finance / warehouse | Finance | Structured | ~daily × accounts | account, balance, currency, counterparty | **L5** |
 
-**Deliberately excluded** (realism without new capability — YAGNI): payroll runs, benefits, recruiting/ATS, expenses, tax, treasury.
+**Re-included per the robust/no-YAGNI directive** (memory `clearance-build-philosophy-robust`): payroll, benefits, recruiting/ATS, expenses, tax, treasury — they add breadth + more sensitive governance surface (bank/health PII, pre-release tax/treasury at L5). Total synthetic sources: **16**.
 
 ---
 
@@ -179,4 +187,4 @@ Generators will live in `seeds/` (per-source modules) and write into SurrealDB C
 
 ---
 
-*Status 2026-06-08: org + full data estate documented (11 verticals, 13 personas, 7 real sources, 10 synthetic sources, opaque-schema seed, access matrix, 8 golden leak-audit scenarios). Drives the catalog, connectors, masking policies, and synthetic generators. Next: `writing-plans` for P0.1.*
+*Status 2026-06-08: org + full data estate documented (11 verticals, **14 personas** incl. Strategist, 7 real sources, **16 synthetic sources**, opaque-schema seed, access matrix, 8 golden leak-audit scenarios). Drives the catalog, connectors, masking policies, and synthetic generators. Build owned by Shuri; P0.1a in execution.*

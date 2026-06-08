@@ -146,7 +146,7 @@ The expensive work is **build-time batch, not serve-time** — it runs on-demand
 
 ### 3.5 The demo org & data story — "Meridian" (locked 2026-06-08)
 
-> **Full reference:** `docs/meridian-org-and-data.md` — the complete world bible (13 personas, access matrix, every real + synthetic asset with schema/masking, the opaque-schema seed, and the leak-audit golden scenarios). This section is the summary.
+> **Full reference:** `docs/meridian-org-and-data.md` — the complete world bible (14 personas incl. Strategist, access matrix, every real + 16 synthetic assets with schema/masking, the opaque-schema seed, and the leak-audit golden scenarios). This section is the summary.
 
 Every dataset is justified by one fictional org, reverse-engineered to fit the real public sources so the demo *makes sense*.
 
