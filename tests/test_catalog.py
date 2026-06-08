@@ -26,3 +26,16 @@ def test_catalog_asset_carries_security_and_columns():
     assert a.sensitivity_class == "F"
     assert a.masked_columns() == {"salary"}
     assert a.column("salary").mask_reason == "PII_MASK"
+
+
+def test_seed_connector_yields_catalog_assets():
+    from rag_engine.catalog.connector import SeedConnector
+    conn = SeedConnector(scale=0.01)
+    assets = list(conn.discover())
+    ids = {a.asset_id for a in assets}
+    # P0.1a estate: 18 synthetic + 7 real = 25 catalog assets
+    assert len(assets) == 25
+    assert "hr_records" in ids and "legacy_mart_tbl_71" in ids and "nyc_tlc_trips" in ids
+    hr = next(a for a in assets if a.asset_id == "hr_records")
+    assert hr.sensitivity_class == "F"
+    assert "salary" in hr.masked_columns()

@@ -43,8 +43,15 @@ class SecurityContext(BaseModel):
         0, ge=0, le=5, description="0 = public, 5 = board-only."
     )
     owner_department: str = Field("UNASSIGNED", description="Originating department.")
+    sensitivity_class: str = Field(
+        "", description="A-N sensitivity class from the Meridian access model."
+    )
+    need_to_know_roles: list[str] = Field(
+        default_factory=list,
+        description="Roles satisfying need-to-know; empty = level+allowed_roles only.",
+    )
 
-    @field_validator("allowed_roles")
+    @field_validator("allowed_roles", "need_to_know_roles")
     @classmethod
     def _normalise_roles(cls, roles: list[str]) -> list[str]:
         # Upper-case and de-duplicate while preserving order — roles are
@@ -146,10 +153,12 @@ class GovernanceDecision(BaseModel):
 
     chunk_id: str
     parent_doc_id: str
-    decision: str  # "allow" | "deny"
+    decision: str  # "allow" | "mask" | "partial" | "deny"
     reason: str
     required_roles: list[str] = Field(default_factory=list)
     session_roles: list[str] = Field(default_factory=list)
+    mask_reason: str = ""  # "pii_mask" | "field_acl_mask" when decision == "mask"
+    scope: str = ""        # partial-access scope predicate when decision == "partial"
 
 
 class RAGResponse(BaseModel):
