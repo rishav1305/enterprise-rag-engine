@@ -21,6 +21,9 @@ class Decision(str, Enum):
     ALLOW = "allow"
     MASK = "mask"
     DENY = "deny"
+    # TODO(P0.1b): no PARTIAL decision yet — §5 marks Engineer/H "partial" (sees some
+    # security tickets, not all). Currently collapsed to DENY for Engineer. Model
+    # partial/row-scoped access when the catalog carries per-ticket ACLs.
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,10 +41,14 @@ CLASSES: dict[str, SensitivityClass] = {
     "B": SensitivityClass("B", "Employee-general", 1),
     "C": SensitivityClass("C", "Team-ops", 2),
     "D": SensitivityClass("D", "Customer-PII", 3),  # masked below L4
-    "E": SensitivityClass("E", "Pre-release financials", 5, ("FINANCE", "C_SUITE")),
+    # C2: E is L4+, FINANCE/C-suite need-to-know (FM✓, Legal✗, analysts✗) — the
+    # non-monotonic teaching point. (NOT L5 — that wrongly denied Finance Manager.)
+    "E": SensitivityClass("E", "Pre-release financials", 4, ("FINANCE", "C_SUITE")),
     "F": SensitivityClass("F", "Exec comp", 5, ("C_SUITE",)),
     "G": SensitivityClass("G", "Legal/M&A", 4, ("LEGAL", "C_SUITE", "STRATEGY")),
-    "H": SensitivityClass("H", "Security incidents", 4, ("CISO", "SECURITY")),
+    # C1: BOARD satisfies H so the CEO ("sees everything") is admitted; CISO/SECURITY
+    # are the operational need-to-know. CFO lacks all three -> CFO✗H (correct).
+    "H": SensitivityClass("H", "Security incidents", 4, ("CISO", "SECURITY", "BOARD")),
     # re-included domains (P0.1a expanded scope)
     "I": SensitivityClass("I", "Payroll (individual)", 5, ("FINANCE", "C_SUITE")),
     "J": SensitivityClass("J", "Benefits (PII)", 2),

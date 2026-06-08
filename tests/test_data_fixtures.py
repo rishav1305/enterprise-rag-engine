@@ -86,23 +86,46 @@ def test_scenario_6_strategist_vs_sales_manager_on_mna():
     assert evaluate_class("F", strat.clearance_level, strat.roles) is Decision.DENY
 
 
-def test_non_monotonic_finance_manager_denied_comp():
-    # golden scenario #4: high clearance, wrong need-to-know
+def test_finance_manager_sees_financials_denied_comp():
+    # C2: FM (L4, FINANCE) ✓ E (pre-release financials) but ✗ F (exec comp).
+    # This is the non-monotonic teaching point — class E is L4+, not L5.
     fm = PERSONAS_BY_KEY["finance_manager"]
-    assert evaluate_class("F", fm.clearance_level, fm.roles) is Decision.DENY
+    assert evaluate_class("E", fm.clearance_level, fm.roles) is Decision.ALLOW
+    assert evaluate_class("F", fm.clearance_level, fm.roles) is Decision.DENY  # scenario #4
 
 
 def test_non_monotonic_legal_denied_financials():
     legal = PERSONAS_BY_KEY["legal_counsel"]
+    # C2: Legal is L4 but lacks FINANCE need-to-know -> ✗ E
     assert evaluate_class("E", legal.clearance_level, legal.roles) is Decision.DENY
     # but legal CAN see legal/M&A (G)
     assert evaluate_class("G", legal.clearance_level, legal.roles) is Decision.ALLOW
+
+
+def test_analysts_denied_financials():
+    # C2 regression: low-level analysts never see E regardless
+    for key in ("data_analyst", "marketing_analyst", "commerce_analyst"):
+        p = PERSONAS_BY_KEY[key]
+        assert evaluate_class("E", p.clearance_level, p.roles) is Decision.DENY
 
 
 def test_cfo_sees_financials_and_comp():
     cfo = PERSONAS_BY_KEY["cfo"]
     assert evaluate_class("E", cfo.clearance_level, cfo.roles) is Decision.ALLOW
     assert evaluate_class("F", cfo.clearance_level, cfo.roles) is Decision.ALLOW
+
+
+def test_ceo_sees_everything():
+    # C1: "CEO sees everything" — ALLOW across A..H (incl. security incidents H)
+    ceo = PERSONAS_BY_KEY["ceo"]
+    for cls in "ABCDEFGH":
+        assert evaluate_class(cls, ceo.clearance_level, ceo.roles) is Decision.ALLOW, cls
+
+
+def test_cfo_denied_security_incidents():
+    # C1: CFO is L5 but lacks CISO/SECURITY/BOARD need-to-know -> ✗ H
+    cfo = PERSONAS_BY_KEY["cfo"]
+    assert evaluate_class("H", cfo.clearance_level, cfo.roles) is Decision.DENY
 
 
 def test_customer_pii_masking_leg():
@@ -127,8 +150,9 @@ def test_all_classes_present():
 # ---- Wave 3: full-estate reproducibility + coherence + masking ---------
 def test_estate_has_all_sources():
     manifest, outputs = build_estate(scale=_SCALE)
-    assert len(manifest.assets) == 24  # 17 synthetic (incl. legacy_mart) + 7 real
-    assert sum(1 for a in manifest.assets if a.synthetic) == 17
+    # 18 synthetic assets (16 sources; legacy_mart splits into tbl_44 + tbl_71) + 7 real
+    assert len(manifest.assets) == 25
+    assert sum(1 for a in manifest.assets if a.synthetic) == 18
     assert sum(1 for a in manifest.assets if not a.synthetic) == 7
 
 
@@ -149,7 +173,9 @@ def test_estate_reproducible_byte_identical(tmp_path):
         assert p1.read_bytes() == p2.read_bytes(), f"{p1.name} not reproducible"
 
 
-def test_masking_policy_complete():
+def test_masking_policy_schema_complete():
+    # SCHEMA-level only: every asset with PII fields declares >=1 maskable field.
+    # Runtime masking ENFORCEMENT (redaction at retrieval) is P0.1b's column-masking.
     manifest, _ = build_estate(scale=_SCALE)
     assert manifest.validate_masking() == []  # zero violations
 
@@ -198,3 +224,52 @@ def test_oracle_grid_covers_all_personas_and_classes():
     assert set(oracle["expectations"]) == {p.key for p in PERSONAS}
     for grid in oracle["expectations"].values():
         assert set(grid) == set(CLASSES)
+
+
+# ---- I1: legacy_mart per-table masking ---------------------------------
+def test_legacy_mart_per_table_masking():
+    manifest, outputs = build_estate(scale=_SCALE)
+    by_id = {a.asset_id: a for a in manifest.assets}
+    # tbl_44.text_2 (full_name) IS masked PII
+    t44 = {f.name: f for f in by_id["legacy_mart_tbl_44"].fields}
+    assert t44["text_2"].pii and t44["text_2"].masked
+    assert t44["text_5"].pii and t44["text_5"].masked  # email
+    # tbl_71.text_2 (order_status) is NOT PII, NOT masked — the I1 bug fix
+    t71 = {f.name: f for f in by_id["legacy_mart_tbl_71"].fields}
+    assert not t71["text_2"].pii
+    assert not t71["text_2"].masked
+    # tbl_71 rows actually carry status values, not names
+    sec = outputs["legacy_mart_tbl_44"].connection["secondary_rows"]
+    assert all(r["text_2"] in {"placed", "shipped", "returned"} for r in sec)
+
+
+# ---- I2: field contract — each source covers its §7 key fields ----------
+# Minimal key-field sets the world bible §7 requires present (and PII present-but-
+# masked, never absent). Extend as sources evolve.
+_REQUIRED_FIELDS = {
+    "hr_records": {"employee_id", "salary", "manager_id"},
+    "payroll_runs": {"employee_id", "gross", "net_pay", "bank_acct"},  # I2: bank_acct
+    "crm_pipeline": {"account", "stage", "deal_value", "owner"},
+    "payments_ledger": {"txn_id", "amount", "merchant", "kyc_id", "name", "dob", "gov_id"},
+    "procurement_graph": {"id", "kind"},
+    "prerelease_financials": {"segment", "quarter", "projection", "status"},
+    "legal_memos": {"doc_id", "kind", "target", "status"},
+}
+
+
+def test_source_field_contracts():
+    manifest, _ = build_estate(scale=_SCALE)
+    by_id = {a.asset_id: a for a in manifest.assets}
+    for asset_id, required in _REQUIRED_FIELDS.items():
+        declared = {f.name for f in by_id[asset_id].fields}
+        missing = required - declared
+        assert not missing, f"{asset_id} missing required fields: {missing}"
+
+
+def test_payroll_bank_acct_present_and_masked():
+    # I2: §7 requires bank_acct present-and-masked; §10 says PII never just absent.
+    manifest, outputs = build_estate(scale=_SCALE)
+    by_id = {a.asset_id: a for a in manifest.assets}
+    bank = next(f for f in by_id["payroll_runs"].fields if f.name == "bank_acct")
+    assert bank.pii and bank.masked
+    assert all("bank_acct" in r for r in outputs["payroll_runs"].rows)

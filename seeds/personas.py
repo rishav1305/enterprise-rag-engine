@@ -35,7 +35,8 @@ PERSONAS: tuple[Persona, ...] = (
     Persona("ciso", "CISO", "RISK_SECURITY", 4, ("CISO", "SECURITY", "EMPLOYEE")),
     Persona("strategist", "Strategist", "STRATEGY", 4, ("STRATEGY", "EMPLOYEE")),
     Persona("cfo", "CFO", "FINANCE", 5, ("C_SUITE", "FINANCE", "EMPLOYEE")),
-    Persona("ceo", "CEO", "CORPORATE", 5, ("C_SUITE", "EMPLOYEE")),
+    # CEO holds BOARD so class H (security incidents) admits — "CEO sees everything".
+    Persona("ceo", "CEO", "CORPORATE", 5, ("C_SUITE", "BOARD", "CEO", "EMPLOYEE")),
 )
 
 PERSONAS_BY_KEY: dict[str, Persona] = {p.key: p for p in PERSONAS}

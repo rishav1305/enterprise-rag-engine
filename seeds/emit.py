@@ -85,14 +85,24 @@ def emit(out_dir: str | Path, scale: float = 1.0) -> dict[str, Any]:
     # manifest.json (byte-stable)
     (out_dir / "manifest.json").write_text(manifest.to_json())
 
-    # per-source rows (JSONL, deterministic order)
-    for asset_id, out in outputs.items():
-        if out.rows:
+    def _write_rows(asset_id: str, rows: list[dict[str, Any]]) -> None:
+        if rows:
             lines = "\n".join(
                 json.dumps(r, sort_keys=True, separators=(",", ":"), default=str)
-                for r in out.rows
+                for r in rows
             )
             (rows_dir / f"{asset_id}.jsonl").write_text(lines)
+
+    # per-source rows (JSONL, deterministic order)
+    secondary_rows = 0
+    for asset_id, out in outputs.items():
+        _write_rows(asset_id, out.rows)
+        # multi-asset sources (e.g. legacy_mart tbl_44 + tbl_71) carry a secondary set
+        sec_id = out.connection.get("secondary_asset_id")
+        if sec_id:
+            sec_rows = out.connection.get("secondary_rows", [])
+            _write_rows(sec_id, sec_rows)
+            secondary_rows += len(sec_rows)
 
     # oracle.json
     (out_dir / "oracle.json").write_text(
@@ -100,15 +110,19 @@ def emit(out_dir: str | Path, scale: float = 1.0) -> dict[str, Any]:
     )
 
     # glossary_truth.json (from legacy_mart connection metadata)
-    lm = outputs["legacy_mart"]
+    lm = outputs["legacy_mart_tbl_44"]
     (out_dir / "glossary_truth.json").write_text(
-        json.dumps(lm.connection, sort_keys=True, separators=(",", ":"))
+        json.dumps(
+            {"glossary_truth": lm.connection["glossary_truth"],
+             "legacy_views": lm.connection["legacy_views"]},
+            sort_keys=True, separators=(",", ":"),
+        )
     )
 
     return {
         "asset_count": len(manifest.assets),
         "synthetic": sum(1 for a in manifest.assets if a.synthetic),
         "real": sum(1 for a in manifest.assets if not a.synthetic),
-        "total_rows": sum(len(o.rows) for o in outputs.values()),
+        "total_rows": sum(len(o.rows) for o in outputs.values()) + secondary_rows,
         "out_dir": str(out_dir),
     }

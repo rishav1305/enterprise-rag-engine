@@ -24,6 +24,7 @@ def generate(manifest: Manifest, scale: float = 1.0) -> SourceOutput:
     for eid in emp_ids:
         node = org[eid]
         monthly_gross = (80_000 + node.level * 35_000) / 12.0
+        bank_acct = rng.faker.iban()  # per-employee; PII, masked (never absent — §10)
         for period in _PERIODS:
             tax_wh = round(monthly_gross * float(rng.np.uniform(0.20, 0.32)), 2)
             net = round(monthly_gross - tax_wh, 2)
@@ -34,6 +35,7 @@ def generate(manifest: Manifest, scale: float = 1.0) -> SourceOutput:
                 "gross": round(monthly_gross, 2),
                 "tax_withheld": tax_wh,
                 "net_pay": net,
+                "bank_acct": bank_acct,
             })
 
     asset = register(
@@ -57,6 +59,7 @@ def generate(manifest: Manifest, scale: float = 1.0) -> SourceOutput:
             FieldSpec("gross", "float", pii=True, masked=True),
             FieldSpec("tax_withheld", "float", pii=True, masked=True),
             FieldSpec("net_pay", "float", pii=True, masked=True),
+            FieldSpec("bank_acct", "str", pii=True, masked=True),
         ),
         row_count=len(rows),
     )
