@@ -77,7 +77,7 @@ A `SecurityContext` (frozen Pydantic model in the engine) carries `allowed_roles
 
 ## 5. Access matrix (the governance core — deliberately non-monotonic)
 
-Asset sensitivity classes: **A** Public (L0) · **B** Employee-general (L1) · **C** Team-ops (L2) · **D** Customer-PII (L3, masked below L4) · **E** Pre-release financials (L5) · **F** Exec comp (L5) · **G** Legal/M&A (L4–L5) · **H** Security incidents (L4).
+Asset sensitivity classes: **A** Public (L0) · **B** Employee-general (L1) · **C** Team-ops (L2) · **D** Customer-PII (L3, masked below L4) · **E** Pre-release financials (**L4+, FINANCE/C-suite need-to-know**) · **F** Exec comp (L5) · **G** Legal/M&A (L4–L5) · **H** Security incidents (L4).
 
 | Persona | A | B | C | D | E | F | G | H |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|

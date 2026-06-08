@@ -11,3 +11,7 @@ dist/
 htmlcov/
 .env
 .DS_Store
+
+.venv-p0.1a/
+seeds/_out/
+*.tvim
