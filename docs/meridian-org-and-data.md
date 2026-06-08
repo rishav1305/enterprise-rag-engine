@@ -86,7 +86,7 @@ Asset sensitivity classes: **A** Public (L0) · **B** Employee-general (L1) · *
 | Data/Ops/Commerce Analyst | ✓ | ✓ | ✓ | **masked** | ✗ | ✗ | ✗ | ✗ |
 | Marketing Analyst | ✓ | ✓ | ✓ | **masked** | ✗ | ✗ | ✗ | ✗ |
 | Engineer | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | partial |
-| Sales Manager | ✓ | ✓ | ✓ | ✓ (raw) | ✗ | ✗ | ✗ | ✗ |
+| Sales Manager | ✓ | ✓ | ✓ | **masked** | ✗ | ✗ | ✗ | ✗ |
 | Finance Manager | ✓ | ✓ | ✓ | ✓ | ✓ | **✗** | ✗ | ✗ |
 | Legal Counsel | ✓ | ✓ | ✓ | ✓ | **✗** | **✗** | ✓ | ✗ |
 | Strategist | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | **✓** | ✗ |
@@ -95,6 +95,8 @@ Asset sensitivity classes: **A** Public (L0) · **B** Employee-general (L1) · *
 | CEO | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 **The point:** Finance Manager has high clearance but **cannot** see exec comp (F); Legal has high clearance but **cannot** see financials (E) or comp (F); HR can see comp bands but not pre-release financials. Access = **level AND role/need-to-know**, never level alone. This is what makes the leak audit meaningful.
+
+> **Customer-PII (class D) is masked, not raw, below L4 — including for Sales Manager (L3).** Earlier drafts gave Sales Manager raw D; the implementation masks it (least-privilege/SECURE pillar): the row is still returned, with PII redacted. Raw customer PII requires L4+. Pinned by `tests/test_leak_oracle.py::test_sales_manager_customer_pii_is_masked_not_raw`.
 
 ---
 

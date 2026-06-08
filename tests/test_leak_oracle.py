@@ -62,3 +62,15 @@ def test_oracle_covers_full_matrix():
     assert set(oracle) == set(PERSONAS_BY_KEY)  # 14 personas
     for grid in oracle.values():
         assert set(grid) == set(CLASSES)         # 14 classes
+
+
+def test_sales_manager_customer_pii_is_masked_not_raw():
+    # CEO-confirmed (Task 10): Sales Manager sees customer PII MASKED, not raw —
+    # least-privilege. World-bible §5 doc aligned to this impl. Pins against drift.
+    p = PERSONAS_BY_KEY["sales_manager"]
+    sess = Session(user_id="sm", roles=list(p.roles), clearance_level=p.clearance_level)
+    assert evaluate(_chunk_for("D"), sess).decision == "mask"
+    # raw only at L4+ (e.g. CFO)
+    cfo = PERSONAS_BY_KEY["cfo"]
+    cfo_sess = Session(user_id="cfo", roles=list(cfo.roles), clearance_level=cfo.clearance_level)
+    assert evaluate(_chunk_for("D"), cfo_sess).decision == "allow"
