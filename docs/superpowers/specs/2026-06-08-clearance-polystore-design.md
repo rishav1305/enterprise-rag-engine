@@ -146,6 +146,8 @@ The expensive work is **build-time batch, not serve-time** — it runs on-demand
 
 ### 3.5 The demo org & data story — "Meridian" (locked 2026-06-08)
 
+> **Full reference:** `docs/meridian-org-and-data.md` — the complete world bible (13 personas, access matrix, every real + synthetic asset with schema/masking, the opaque-schema seed, and the leak-audit golden scenarios). This section is the summary.
+
 Every dataset is justified by one fictional org, reverse-engineered to fit the real public sources so the demo *makes sense*.
 
 **Meridian** — "the everything app for cities": a global **super-app + marketplace** (~12,000 employees, multi-region) running **ride-hailing/logistics**, an **online marketplace/retail** arm, **fintech/payments**, **ads/growth**, and a **corporate strategy** function. It grew by **acquisition** — which is *why* its warehouse has meaningless column names and its data sprawls across systems. A super-app is the one org type that naturally produces all of: trips, retail transactions, payments, ads, plus heavy external-signal monitoring — and it makes all three hero demos land (PB funnel over trips/sales; opaque-schema glossary over the acquired retailer's warehouse; need-to-know governance across Finance/HR/Legal/Security).
