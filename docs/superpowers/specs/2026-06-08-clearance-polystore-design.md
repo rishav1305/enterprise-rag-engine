@@ -183,16 +183,17 @@ Each phase ends with the leak audit green and the eval gate passing.
 
 ---
 
-## 8. Open decisions (to confirm before/within `writing-plans`)
+## 8. Decisions — RESOLVED 2026-06-08
 
-- **TurboVec — resolved** (`github.com/RyanCodrai/turbovec`, MIT, Rust+PyO3, Google TurboQuant 16×). It *is* the vector index, with allowlist filtered search. Remaining detail: index lifecycle in serverless — ship/load the persisted index per cold start vs a tiny always-warm index service. *Lean: persist index, load on cold start (≈384 B/vec keeps it small); revisit if cold-start latency hurts.*
-- **SurrealDB hosting**: SurrealDB Cloud free tier (0.25 vCPU / 512 MB / 1 GB) vs self-hosted on titan-pc ($0, more headroom). *Lean self-host on titan-pc for the demo corpus; keep Cloud free tier as the "managed story" if a reviewer wants to see it hosted.*
-- **External warehouse**: BigQuery public datasets (NYC TLC + GDELT already hosted, free sandbox) is the default text-to-SQL target. Alternatives: ClickHouse Cloud playground, Snowflake trial. *Lean BigQuery (datasets already there).*
-- **Text-to-SQL safety**: read-only credentials, parameterized/allow-listed query generation, cost guard on BigQuery bytes-scanned. *Required (SECURE pillar).*
-- **Secrets**: connector creds via Vercel env + `.env.local`, durable copy in Vaultwarden (`credentials-policy`). Never committed.
-- **Licenses (informational only — SOVEREIGN dropped for project-m)**: no longer a selection filter. For the record: TurboVec MIT; SurrealDB BSL 1.1; Firecrawl AGPL; most else Apache/MIT. Noted, not gating.
-- **Remote/visibility**: public GitHub (client-magnet) vs private Gitea until polished (`git-remote-policy`).
-- **Demo deploy target**: stateless orchestrator on Vercel Python serverless (PMB pattern) behind `portfolio_app` `/projects/clearance`; all stores hosted. No titan-gpu always-on dependency.
+- **TurboVec** ✅ (`github.com/RyanCodrai/turbovec`, MIT, Rust+PyO3, TurboQuant 16×) — the vector index, allowlist filtered search. Persist the index; load on cold start (≈384 B/vec keeps it small); revisit if cold-start latency hurts.
+- **SurrealDB hosting** ✅ **Hybrid** — SurrealDB **Cloud free tier** (account already created) serves the live hosted demo path; **self-host on titan-pc** for dev, heavier corpora, and headroom. Same engine both sides; connection string is config (CONFIGURABLE).
+- **External warehouse** ✅ **BigQuery** — public datasets (NYC TLC, GDELT) on the sandbox free tier; the text-to-SQL target for the PB tail.
+- **Text-to-SQL safety** ✅ read-only credentials · `sqlglot` AST gate (reject any non-SELECT) + allow-listed/parameterized generation · `maximum_bytes_billed` + mandatory partition filter cost guard. (SECURE pillar.)
+- **LLM provider** ✅ **Groq (default — LPU, sub-second) + NVIDIA NIM (alternate)**, both **OpenAI-compatible**, behind the existing `Generator` ABC (replaces Anthropic for the demo; user holds keys for both). Same provider used for generation, Contextual-Retrieval enrichment, glossary LLM-drafting, and the eval judge. Extractive generator stays the zero-dependency offline fallback. Provider/model are config (`RAG_GENERATOR`, base_url, model).
+- **Secrets** ✅ connector + provider creds via Vercel env + `.env.local`, durable copy in **Vaultwarden** (`credentials-policy`). Never committed.
+- **Remote/visibility** ✅ **both** — public **GitHub** (`github.com/rishav1305`, client-magnet) **and** private **Gitea** mirror. Push to both; verify with `git-remote-policy` before the first GitHub push.
+- **Demo deploy** ✅ stateless orchestrator on **Vercel Python serverless (Hobby, $0)** behind `portfolio_app` `/projects/clearance`; replicate PMB's `maxDuration: 300` config. All stores hosted; **heavy compute (embedding, indexing, glossary profiling) runs offline on titan-gpu**, never in the request path. Pro ($20) only if always-warm/commercial-ToS forces it later.
+- **Licenses** — informational only (SOVEREIGN dropped). TurboVec MIT; SurrealDB BSL 1.1; Firecrawl AGPL; rest Apache/MIT. Not gating.
 
 ---
 
@@ -211,7 +212,8 @@ Principle: **adopt mature tools *around* the differentiators; keep the different
 | Connectors/ingestion | **dlt** (MIT) | in-process; loads into custom targets (SurrealDB/TurboVec). Optional Fivetran for hairy SaaS (Salesforce/Workday/Slack/Confluence) routed via a warehouse. |
 | Doc parsing | **LlamaParse** default · **Reducto** for financial/legal/EDGAR · Docling for bulk | biggest quality win unlocked by dropping the license filter. Tiered by doc difficulty. |
 | Web crawl | **Firecrawl** (API) + **Exa** for discovery | replaces crawl4ai (AGPL no longer a blocker). |
-| Chunking + contextual | **Chonkie** (MIT) + **Anthropic Contextual Retrieval** at ingest | per-chunk context call now allowed (−67% retrieval failures w/ rerank). |
+| Chunking + contextual | **Chonkie** (MIT) + **Contextual Retrieval** at ingest (via Groq/NVIDIA) | per-chunk context call now allowed (−67% retrieval failures w/ rerank); provider-agnostic — run on Groq/NVIDIA, not Anthropic. |
+| LLM generation | **Groq** (default, LPU-fast) + **NVIDIA NIM** (alt), OpenAI-compatible, behind the `Generator` ABC | replaces Anthropic; generous free tiers; sub-second inference shrinks the request path; extractive stays offline fallback. |
 | PII detection | **Presidio** (MIT) | hosted DLP can't see Slack/Salesforce/Workday; Presidio runs cross-source. Masking *policy* stays first-party. |
 | Embeddings | **Voyage-3-large** | leads on technical/financial/legal retrieval. ⚠️ swap forces a full re-embed + TurboQuant recall re-validation — sequence as its own task. |
 | Reranking | **Cohere Rerank 4 Pro** behind the **`rerankers`** abstraction | top commercial quality, no local GPU; `rerankers` keeps providers swappable. |
@@ -221,7 +223,7 @@ Principle: **adopt mature tools *around* the differentiators; keep the different
 | Big-data access | **google-cloud-bigquery** + **DuckDB/Polars** over `hf://`/`s3://` | query in place. |
 | Dedup (funnel) | **datasketch** (MinHashLSH) + semantic 2nd pass via TurboVec embeddings | — |
 | Eval / CI gate | **DeepEval** (pytest `assert_test`) + **RAGAS** metrics | keep the governance/leak assertions custom. Optional Braintrust for a hosted dashboard. |
-| Red-team | **promptfoo** (CI gate) + **garak** (weekly) | ⚠️ promptfoo acquired by OpenAI (Mar 2026) — still MIT; governance note for an Anthropic stack. |
+| Red-team | **promptfoo** (CI gate) + **garak** (weekly) | ⚠️ promptfoo acquired by OpenAI (Mar 2026) — still MIT; minor governance note (we run non-OpenAI models on Groq/NVIDIA). |
 | Authorization | **Oso Cloud** (managed `list-objects` → pre-filter set); SpiceDB self-host as the cheaper growth path | answers "which objects can user X see" to pre-filter retrieval. Keep drop-decision + audit first-party. |
 | Observability | **Langfuse Cloud** via **OTel/OpenLLMetry** | per-request cost/token + retrieval-path spans; vendor-portable instrumentation. |
 
@@ -229,7 +231,7 @@ Principle: **adopt mature tools *around* the differentiators; keep the different
 - **Backbone: keep the custom 5-layer ABC pipeline.** Do not adopt LangChain or LlamaIndex wholesale.
 - **LangGraph** — only if/when the flow becomes genuinely agentic (loops / re-retrieval / HITL), as the orchestration layer *behind the router ABC*. PMB already uses it.
 - **LlamaIndex** — à la carte library only (e.g. LlamaParse, a retriever), never owning the chunk/governance boundary.
-- **LangSmith** — **not needed** (custom + Anthropic stack). OTel/OpenLLMetry → Langfuse is more portable and covers tracing + cost + provenance.
+- **LangSmith** — **not needed** (custom pipeline + Groq/NVIDIA OpenAI-compatible stack). OTel/OpenLLMetry → Langfuse is more portable and covers tracing + cost + provenance.
 
 ### To revisit
 - **Text-to-SQL**: Vanna 2.0 un-archived; **Wren AI** maintained — both overlap the glossary. *1-day spike* on Wren's MDL; adopt only if it cleanly models opaque-schema retrieval at lower build cost. Default: keep the build.
@@ -239,12 +241,12 @@ Principle: **adopt mature tools *around* the differentiators; keep the different
 
 ## 10. Platform setup & cost route (researched 2026-06-08, verified live)
 
-**Headline: the demo runs ~$0/mo, or $20/mo if we need the >60s function window.** Every component lands on a real free tier or self-hosts free on titan; the LLM bill is absorbed by the corporate LiteLLM proxy.
+**Headline: the demo runs ~$0/mo on Vercel Hobby** (PMB pattern — `maxDuration: 300`), with **heavy compute offline on titan-gpu** so the request path stays short. Every component lands on a real free tier or self-hosts free on titan; LLM inference is on Groq/NVIDIA free tiers. No Vercel Pro needed.
 
 | Platform | Free tier | What drives cost | Demo route |
 |---|---|---|---|
-| **Vercel** (orchestrator) | Hobby: 60s cap, non-commercial | Active CPU-seconds, duration cap | **Pro $20/mo** *iff* >60s or commercial; else $0. The one near-unavoidable spend. |
-| **SurrealDB** | Cloud free 0.25vCPU/512MB/1GB | always-on compute | **self-host on titan-pc ($0)**; Cloud free as managed story |
+| **Vercel** (orchestrator) | Hobby ($0) — PMB runs `maxDuration: 300` here today | Active CPU-seconds | **$0 on Hobby**; keep request path short by running heavy work offline on titan. Pro ($20) only if always-warm/commercial-ToS forces it. |
+| **SurrealDB** | Cloud free 0.25vCPU/512MB/1GB (account created) | always-on compute | **hybrid**: Cloud free for the hosted demo + self-host on titan-pc for dev/headroom ($0) |
 | **TurboVec** | OSS in-function | function RAM | $0 always |
 | **BigQuery** | Sandbox 1 TB scanned + 10 GB, no card | bytes scanned | $0 under partitioned/`LIMIT`-ed queries |
 | **Common Crawl/S3** | public read | **egress ~$0.09/GB** | query in-region, sample only — never bulk-download |
@@ -254,17 +256,17 @@ Principle: **adopt mature tools *around* the differentiators; keep the different
 | **Cohere Rerank** | trial 1k calls/mo (non-commercial) | search units | $0 demo; **first real $** at commercial (~$2/1k) |
 | **Oso Cloud** | Dev free 100k req/mo | authz requests | $0 demo; $149 cliff → self-host SpiceDB to grow |
 | **Langfuse** | Hobby 50k events/mo | events ingested | $0 demo; self-host on titan to grow |
-| **Anthropic** | — | tokens | **~$0 via corporate LiteLLM proxy**; else Sonnet 4.6 default, Haiku for cheap steps |
+| **LLM (Groq / NVIDIA)** | Groq + NVIDIA NIM free tiers (user holds keys) | tokens beyond free tier | **~$0 at demo volume**; Groq default for speed, NVIDIA NIM as alt/larger-model |
 | **OSS toolbelt** | free | titan compute | $0 always |
 
-**Most cost-effective route:** Vercel Pro ($20, only for the 300s window) · SurrealDB + SpiceDB + TurboVec + OSS self-hosted on titan ($0) · BigQuery sandbox · free tiers for parse/crawl/embed/rerank/authz/trace · LLM via proxy.
+**Most cost-effective route:** Vercel **Hobby ($0)** · SurrealDB hybrid (Cloud free + titan) · TurboVec + SpiceDB + OSS self-hosted on titan ($0) · BigQuery sandbox · free tiers for parse/crawl/embed/rerank/authz/trace · **LLM on Groq/NVIDIA free tiers** · heavy compute offline on titan-gpu.
 
-**Monthly estimate:** **demo ≈ $20/mo** (or $0 if we keep the pipeline <60s and non-commercial). **Light-production ≈ $350–500/mo** (proxy covers LLM; parse in cost-effective mode) — the cliffs are Oso ($149 → self-host SpiceDB), LlamaParse page overflow, and Cohere/LLM at volume.
+**Monthly estimate:** **demo ≈ $0/mo.** **Light-production ≈ $250–400/mo** — the cliffs are Oso ($149 → self-host SpiceDB), LlamaParse page overflow, Cohere reranking at volume, and Groq/NVIDIA tokens past the free tier (still far cheaper than frontier APIs).
 
 **Cost guardrails (all config-driven — CONFIGURABLE pillar):** BigQuery `maximum_bytes_billed` cap + mandatory partition filter + no `SELECT *`; `parse_mode=cost-effective` default with an agent-mode allowlist; incremental/content-hash embedding (never full re-embed in CI); `max_duration ≤ 300s` + offload heavy compute (embeddings, eval suites) to titan-gpu; `trace_sampling_rate < 1.0` in prod; bounded crawl depth + retry budgets.
 
-**For the 4-project portfolio:** free tiers + titan self-hosting amortize across all four, so the marginal platform cost of the whole portfolio stays the single **$20/mo Vercel Pro seat**.
+**For the 4-project portfolio:** free tiers + titan self-hosting amortize across all four; on Vercel Hobby the marginal platform cost of the whole portfolio is **~$0/mo**.
 
 ---
 
-*Status 2026-06-08: engine extracted to `~/project-m/projects/enterprise-rag-engine/`. Spec covers architecture (SurrealDB unified + TurboVec + BigQuery PB tail), tooling (§9), and platform/cost route (§10). SOVEREIGN dropped per project-m policy. Next: Ledger umbrella spec, then `writing-plans` for P0.1.*
+*Status 2026-06-08: engine extracted to `~/project-m/projects/enterprise-rag-engine/`. Spec covers architecture (SurrealDB hybrid + TurboVec + BigQuery PB tail), tooling (§9), and platform/cost (§10). §8 decisions RESOLVED: SurrealDB hybrid (account created), BigQuery, Groq+NVIDIA LLM (OpenAI-compatible), dual remote (GitHub + Gitea), Vercel Hobby ($0). SOVEREIGN dropped per project-m policy. Demo ≈ $0/mo. Next: user review, then `writing-plans` for P0.1.*
