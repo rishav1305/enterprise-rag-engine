@@ -18,7 +18,12 @@ from seeds import SEED  # noqa: E402
 from seeds._coherence import anchors  # noqa: E402
 from seeds._rng import derive_rng  # noqa: E402
 from seeds.access_matrix import CLASSES, Decision, evaluate_class  # noqa: E402
+from seeds.emit import build_estate, build_oracle, emit  # noqa: E402
 from seeds.personas import PERSONAS, PERSONAS_BY_KEY  # noqa: E402
+from seeds.synthetic import legacy_mart  # noqa: E402
+
+# small representative scale keeps the gate fast + deterministic
+_SCALE = 0.01
 
 
 # ---- determinism / RNG -------------------------------------------------
@@ -117,3 +122,79 @@ def test_intern_denied_sensitive():
 def test_all_classes_present():
     # A..H + re-included I..N
     assert set(CLASSES) == set("ABCDEFGHIJKLMN")
+
+
+# ---- Wave 3: full-estate reproducibility + coherence + masking ---------
+def test_estate_has_all_sources():
+    manifest, outputs = build_estate(scale=_SCALE)
+    assert len(manifest.assets) == 24  # 17 synthetic (incl. legacy_mart) + 7 real
+    assert sum(1 for a in manifest.assets if a.synthetic) == 17
+    assert sum(1 for a in manifest.assets if not a.synthetic) == 7
+
+
+def test_estate_reproducible_byte_identical(tmp_path):
+    # THE HARD GATE: emit twice -> byte-identical manifest + rows + oracle
+    s1 = emit(tmp_path / "run1", scale=_SCALE)
+    s2 = emit(tmp_path / "run2", scale=_SCALE)
+    assert s1["total_rows"] == s2["total_rows"]
+    for name in ("manifest.json", "oracle.json", "glossary_truth.json"):
+        a = (tmp_path / "run1" / name).read_bytes()
+        b = (tmp_path / "run2" / name).read_bytes()
+        assert a == b, f"{name} not byte-identical across runs"
+    # every row file identical too
+    r1 = sorted((tmp_path / "run1" / "rows").glob("*.jsonl"))
+    r2 = sorted((tmp_path / "run2" / "rows").glob("*.jsonl"))
+    assert [p.name for p in r1] == [p.name for p in r2]
+    for p1, p2 in zip(r1, r2):
+        assert p1.read_bytes() == p2.read_bytes(), f"{p1.name} not reproducible"
+
+
+def test_masking_policy_complete():
+    manifest, _ = build_estate(scale=_SCALE)
+    assert manifest.validate_masking() == []  # zero violations
+
+
+def test_coherence_org_chart_referential_integrity():
+    _, outputs = build_estate(scale=1.0)  # full org for integrity check
+    hr_rows = outputs["hr_records"].rows
+    for r in hr_rows:
+        if r["manager_id"]:
+            assert r["manager_id"] in anchors().org_chart
+
+
+def test_coherence_financials_roll_up_from_revenue():
+    _, outputs = build_estate(scale=_SCALE)
+    fin = outputs["prerelease_financials"].rows
+    rev = anchors().segment_revenue
+    for row in fin:
+        # projection must be >= actual (deterministic optimism factor) and actual
+        # must equal the coherence anchor revenue for that quarter+segment
+        assert row["actual_revenue"] == rev[row["quarter"]][row["segment"]]
+        assert row["projection"] >= row["actual_revenue"]
+
+
+def test_real_fixtures_contract():
+    manifest, outputs = build_estate(scale=_SCALE)
+    real = [a for a in manifest.assets if not a.synthetic]
+    for a in real:
+        assert a.provenance_url, f"{a.asset_id} missing provenance link"
+        assert a.scale_badge, f"{a.asset_id} missing scale badge"
+        assert outputs[a.asset_id].rows == []  # queried in place, never materialized
+    # Common Crawl is catalog-only (no sample pull)
+    assert outputs["common_crawl"].connection["catalog_only"] is True
+
+
+def test_opaque_schema_seed_present():
+    from seeds.manifest import Manifest
+    out = legacy_mart.generate(Manifest())
+    truth = out.connection["glossary_truth"]
+    assert truth["tbl_44.text_2"] == "full_name"
+    assert truth["tbl_44.text_5"] == "email"
+    assert "v_cust" in out.connection["legacy_views"]
+
+
+def test_oracle_grid_covers_all_personas_and_classes():
+    oracle = build_oracle()
+    assert set(oracle["expectations"]) == {p.key for p in PERSONAS}
+    for grid in oracle["expectations"].values():
+        assert set(grid) == set(CLASSES)
