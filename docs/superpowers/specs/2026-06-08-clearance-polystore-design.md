@@ -129,6 +129,21 @@ For warehouses where column/table names carry no meaning (`text_2`, `tbl_44`):
 
 This is its own subsystem (`enrichment/schema_glossary/`): a profiler + query-log miner + LLM-drafter + glossary store + drift check.
 
+### 3.4 Offline build pipeline (no always-on machine, no GPU)
+
+The expensive work is **build-time batch, not serve-time** — it runs on-demand when the corpus changes, then exits. With the chosen stack every step is an API call or light CPU work, so it runs on a laptop, titan-pc, or a **GitHub Actions runner** (`make index`):
+
+| Build step | Engine / model | Compute |
+|---|---|---|
+| chunk corpus | Chonkie | CPU |
+| embed chunks | **Voyage-3-large (API)** | network |
+| contextual enrichment | **Groq / NVIDIA (API)** | network |
+| build vector index → `index.tvq` | **TurboVec** (Rust/CPU SIMD) | CPU |
+| profile values + draft glossary | DuckDB/Polars (CPU) + Groq/NVIDIA (API) | CPU + network |
+| dedup (funnel) | datasketch MinHash | CPU |
+
+**Artifact flow:** the batch writes chunk text + ACLs + graph + catalog + glossary into **SurrealDB Cloud** (managed, always-up) and emits the **TurboVec index as a file** (`index.tvq`, ≈384 B/vec → ~19 MB for 50k chunks). The index ships in the function bundle or **Vercel Blob**; the serverless function loads it on cold start. **Serving (per query) touches only hosted services** — Vercel + SurrealDB Cloud + Cohere rerank + Groq generate + BigQuery — so nothing of yours stays online. titan is *optional*: a convenient batch host, or a future home for local embeddings (TEI + bge-m3) / self-hosted stores if free tiers are outgrown.
+
 ---
 
 ## 4. Governance model (extended across backends)
@@ -192,7 +207,7 @@ Each phase ends with the leak audit green and the eval gate passing.
 - **LLM provider** ✅ **Groq (default — LPU, sub-second) + NVIDIA NIM (alternate)**, both **OpenAI-compatible**, behind the existing `Generator` ABC (replaces Anthropic for the demo; user holds keys for both). Same provider used for generation, Contextual-Retrieval enrichment, glossary LLM-drafting, and the eval judge. Extractive generator stays the zero-dependency offline fallback. Provider/model are config (`RAG_GENERATOR`, base_url, model).
 - **Secrets** ✅ connector + provider creds via Vercel env + `.env.local`, durable copy in **Vaultwarden** (`credentials-policy`). Never committed.
 - **Remote/visibility** ✅ **both** — public **GitHub** (`github.com/rishav1305`, client-magnet) **and** private **Gitea** mirror. Push to both; verify with `git-remote-policy` before the first GitHub push.
-- **Demo deploy** ✅ stateless orchestrator on **Vercel Python serverless (Hobby, $0)** behind `portfolio_app` `/projects/clearance`; replicate PMB's `maxDuration: 300` config. All stores hosted; **heavy compute (embedding, indexing, glossary profiling) runs offline on titan-gpu**, never in the request path. Pro ($20) only if always-warm/commercial-ToS forces it later.
+- **Demo deploy** ✅ stateless orchestrator on **Vercel Python serverless (Hobby, $0)** behind `portfolio_app` `/projects/clearance`; replicate PMB's `maxDuration: 300` config. All stores hosted. **No always-on machine of yours is required** — heavy work is an *on-demand batch* (see §3.4): embedding is a Voyage API call, LLM steps are Groq/NVIDIA API, and the index/profiling/dedup are light CPU that runs on a laptop, titan-pc, or a GitHub Actions runner, then exits. Serving path = Vercel + SurrealDB Cloud + Groq/NVIDIA + BigQuery, all managed. Pro ($20) only if always-warm/commercial-ToS forces it later.
 - **Licenses** — informational only (SOVEREIGN dropped). TurboVec MIT; SurrealDB BSL 1.1; Firecrawl AGPL; rest Apache/MIT. Not gating.
 
 ---
@@ -241,11 +256,11 @@ Principle: **adopt mature tools *around* the differentiators; keep the different
 
 ## 10. Platform setup & cost route (researched 2026-06-08, verified live)
 
-**Headline: the demo runs ~$0/mo on Vercel Hobby** (PMB pattern — `maxDuration: 300`), with **heavy compute offline on titan-gpu** so the request path stays short. Every component lands on a real free tier or self-hosts free on titan; LLM inference is on Groq/NVIDIA free tiers. No Vercel Pro needed.
+**Headline: the demo runs ~$0/mo on Vercel Hobby** (PMB pattern — `maxDuration: 300`), with **indexing as an on-demand batch** (laptop / titan-pc / GitHub Actions) so nothing of yours stays online and the request path stays short. Every component lands on a real free tier; LLM inference is on Groq/NVIDIA free tiers. No Vercel Pro needed, no always-on machine, no GPU.
 
 | Platform | Free tier | What drives cost | Demo route |
 |---|---|---|---|
-| **Vercel** (orchestrator) | Hobby ($0) — PMB runs `maxDuration: 300` here today | Active CPU-seconds | **$0 on Hobby**; keep request path short by running heavy work offline on titan. Pro ($20) only if always-warm/commercial-ToS forces it. |
+| **Vercel** (orchestrator) | Hobby ($0) — PMB runs `maxDuration: 300` here today | Active CPU-seconds | **$0 on Hobby**; indexing is an on-demand batch (not in the request). Pro ($20) only if always-warm/commercial-ToS forces it. |
 | **SurrealDB** | Cloud free 0.25vCPU/512MB/1GB (account created) | always-on compute | **hybrid**: Cloud free for the hosted demo + self-host on titan-pc for dev/headroom ($0) |
 | **TurboVec** | OSS in-function | function RAM | $0 always |
 | **BigQuery** | Sandbox 1 TB scanned + 10 GB, no card | bytes scanned | $0 under partitioned/`LIMIT`-ed queries |
@@ -257,13 +272,13 @@ Principle: **adopt mature tools *around* the differentiators; keep the different
 | **Oso Cloud** | Dev free 100k req/mo | authz requests | $0 demo; $149 cliff → self-host SpiceDB to grow |
 | **Langfuse** | Hobby 50k events/mo | events ingested | $0 demo; self-host on titan to grow |
 | **LLM (Groq / NVIDIA)** | Groq + NVIDIA NIM free tiers (user holds keys) | tokens beyond free tier | **~$0 at demo volume**; Groq default for speed, NVIDIA NIM as alt/larger-model |
-| **OSS toolbelt** | free | titan compute | $0 always |
+| **OSS toolbelt** | free | batch CPU (laptop/CI) | $0 always |
 
-**Most cost-effective route:** Vercel **Hobby ($0)** · SurrealDB hybrid (Cloud free + titan) · TurboVec + SpiceDB + OSS self-hosted on titan ($0) · BigQuery sandbox · free tiers for parse/crawl/embed/rerank/authz/trace · **LLM on Groq/NVIDIA free tiers** · heavy compute offline on titan-gpu.
+**Most cost-effective route:** Vercel **Hobby ($0)** · SurrealDB hybrid (Cloud free + optional titan) · TurboVec index as a shipped file ($0) · BigQuery sandbox · free tiers for parse/crawl/embed/rerank/authz/trace · **LLM on Groq/NVIDIA free tiers** · indexing as an on-demand batch (laptop / titan-pc / GitHub Actions — no always-on box).
 
 **Monthly estimate:** **demo ≈ $0/mo.** **Light-production ≈ $250–400/mo** — the cliffs are Oso ($149 → self-host SpiceDB), LlamaParse page overflow, Cohere reranking at volume, and Groq/NVIDIA tokens past the free tier (still far cheaper than frontier APIs).
 
-**Cost guardrails (all config-driven — CONFIGURABLE pillar):** BigQuery `maximum_bytes_billed` cap + mandatory partition filter + no `SELECT *`; `parse_mode=cost-effective` default with an agent-mode allowlist; incremental/content-hash embedding (never full re-embed in CI); `max_duration ≤ 300s` + offload heavy compute (embeddings, eval suites) to titan-gpu; `trace_sampling_rate < 1.0` in prod; bounded crawl depth + retry budgets.
+**Cost guardrails (all config-driven — CONFIGURABLE pillar):** BigQuery `maximum_bytes_billed` cap + mandatory partition filter + no `SELECT *`; `parse_mode=cost-effective` default with an agent-mode allowlist; incremental/content-hash embedding (never full re-embed in CI); `max_duration ≤ 300s` + run heavy compute (embedding, indexing, eval suites) as an on-demand batch off the request path; `trace_sampling_rate < 1.0` in prod; bounded crawl depth + retry budgets.
 
 **For the 4-project portfolio:** free tiers + titan self-hosting amortize across all four; on Vercel Hobby the marginal platform cost of the whole portfolio is **~$0/mo**.
 
