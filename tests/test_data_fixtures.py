@@ -67,7 +67,18 @@ def test_anchors_memoized_stable():
 
 # ---- personas + access matrix ------------------------------------------
 def test_persona_roster_count():
-    assert len(PERSONAS) == 13  # world bible §4
+    assert len(PERSONAS) == 14  # world bible §4 (incl. Strategist)
+
+
+def test_scenario_6_strategist_vs_sales_manager_on_mna():
+    # golden scenario #6: Strategist ALLOWED M&A (G); Sales Manager DENIED
+    strat = PERSONAS_BY_KEY["strategist"]
+    sales = PERSONAS_BY_KEY["sales_manager"]
+    assert evaluate_class("G", strat.clearance_level, strat.roles) is Decision.ALLOW
+    assert evaluate_class("G", sales.clearance_level, sales.roles) is Decision.DENY
+    # Strategist must NOT see financials (E) or comp (F)
+    assert evaluate_class("E", strat.clearance_level, strat.roles) is Decision.DENY
+    assert evaluate_class("F", strat.clearance_level, strat.roles) is Decision.DENY
 
 
 def test_non_monotonic_finance_manager_denied_comp():

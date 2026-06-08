@@ -40,10 +40,6 @@ class SourceRng:
     np: np.random.Generator
     faker: Faker
 
-    def fixed_epoch_offset(self, days: int) -> int:
-        """Deterministic day offset helper (callers add to a fixed epoch)."""
-        return days
-
 
 def derive_rng(source_name: str, seed: int = SEED) -> SourceRng:
     """Return a deterministic RNG bundle for ``source_name``."""

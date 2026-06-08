@@ -20,7 +20,7 @@ class Persona:
     roles: tuple[str, ...]
 
 
-# world bible §4 — 13 personas
+# world bible §4 — 14 personas (incl. Strategist, fixes golden scenario #6)
 PERSONAS: tuple[Persona, ...] = (
     Persona("intern", "Intern", "KNOWLEDGE_SUPPORT", 1, ("INTERN", "EMPLOYEE")),
     Persona("support_agent", "Support Agent", "KNOWLEDGE_SUPPORT", 1, ("CUSTOMER_SUPPORT", "EMPLOYEE")),
@@ -33,6 +33,7 @@ PERSONAS: tuple[Persona, ...] = (
     Persona("finance_manager", "Finance Manager", "FINANCE", 4, ("FINANCE", "FINANCE_MANAGER", "EMPLOYEE")),
     Persona("legal_counsel", "Legal Counsel", "LEGAL", 4, ("LEGAL", "EMPLOYEE")),
     Persona("ciso", "CISO", "RISK_SECURITY", 4, ("CISO", "SECURITY", "EMPLOYEE")),
+    Persona("strategist", "Strategist", "STRATEGY", 4, ("STRATEGY", "EMPLOYEE")),
     Persona("cfo", "CFO", "FINANCE", 5, ("C_SUITE", "FINANCE", "EMPLOYEE")),
     Persona("ceo", "CEO", "CORPORATE", 5, ("C_SUITE", "EMPLOYEE")),
 )
