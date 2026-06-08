@@ -184,8 +184,15 @@ Gives a deliberately **non-monotonic** access matrix (Finance sees financials no
 | Internal comms | *synthetic* (Slack) | Messages | all | channel-scoped |
 | **Pre-release financials** | *synthetic* (derived from TPC-DS aggregates) | Drive/warehouse | Finance | L5 |
 | **M&A / litigation memos** | *synthetic* | Drive | Legal | L5 |
+| **Procurement / supplier graph** | *synthetic* — **backs Graph mode** | ERP / procurement | Ops/Legal | supplier list L1; contract terms L3 |
+| **Eng/IT incident tickets + error codes** | *synthetic* — **backs Lexical mode** | Jira/ServiceNow + Confluence | Engineering/Security | L1–L2; security-incident tickets L3 |
+| **Payments ledger + KYC** | *synthetic* — fills the **fintech arm** | Warehouse / payments DB | Finance/Risk | **KYC PII masked**; raw L4, aggregates L1 |
+| **Customer support tickets + transcripts** | *synthetic* | Zendesk / Slack | Support | customer PII masked; L1 |
+| **App/service telemetry logs** | *synthetic* — **funnel tier-out demo** | Data lake | Engineering/Ops | high-volume, mostly **NOT indexed** (cold + deduped out); L2 |
 
-Where no true public dataset exists (HR comp, CRM, Slack, M&A), use **clearly-labeled synthetic** data — honest, and where the sharpest governance scenarios live.
+Where no true public dataset exists (HR comp, CRM, Slack, M&A, procurement, tickets, payments, support, telemetry), use **clearly-labeled synthetic** data — honest, and where the sharpest governance scenarios live. We deliberately **stop here**: payroll, benefits, recruiting, expenses, tax, treasury would add realism but no new capability (YAGNI).
+
+**Every retrieval mode now has a real home** (this is *why* these five were added): **Vector** → Wikipedia KB · **Structured/text-to-SQL** → TPC-DS sales + NYC TLC trips + payments ledger · **Graph** → procurement supplier↔contract↔component↔recall · **Lexical/full-text** → Eng/IT error codes + ticket IDs (the exact-ID / `Rishiv→Rishav` typo showcase). Telemetry logs exist precisely to be **tiered/deduped out** by the funnel — demonstrating the PB→TB reduction with real volume rather than asserting it.
 
 **The narrative (what a visitor experiences):** Meridian is a super-app drowning in data — PB of trips/transactions in an acquired warehouse with meaningless column names, billions of event/web records too big to ingest, and sensitive HR/Finance/Legal material across Slack/Drive/Confluence/Salesforce/Workday. The visitor **picks a persona**, asks a question, and watches: router picks a backend → funnel collapses PB→thousands → text-to-SQL translates `text_2` via the glossary → retrieval → **governance drops what that persona can't see** → cited answer + audit trail. **Headline scene:** an **Intern** asks *"what are our Q3 projections and exec salaries?"* → restricted rows/chunks dropped + audited; the **CFO** asks the same and gets them. Same index, different session token.
 
