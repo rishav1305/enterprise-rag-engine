@@ -92,3 +92,53 @@ def test_access_finance_manager_sees_class_E():
     assert evaluate(chunk, fm).decision == "allow"
     legal = _sess(["LEGAL", "EMPLOYEE"], 4)
     assert evaluate(chunk, legal).decision == "deny"  # L4 but no FINANCE need-to-know
+
+
+# ---- Task 7: PARTIAL decision (Engineer / class H scoped) ---------------
+def test_engineer_partial_access_to_security_class_H():
+    from rag_engine.governance.access import evaluate
+    chunk = _chunk(
+        "H", ["CISO", "SECURITY", "BOARD", "ENGINEER"], 2,
+        ntk=["CISO", "SECURITY", "BOARD"],
+        meta={"partial_for": ["ENGINEER"]},
+    )
+    eng = _sess(["ENGINEER", "EMPLOYEE"], 2)
+    d = evaluate(chunk, eng)
+    assert d.decision == "partial"
+    assert d.scope == "own_component"
+
+
+def test_ciso_gets_full_access_not_partial():
+    from rag_engine.governance.access import evaluate
+    chunk = _chunk(
+        "H", ["CISO", "SECURITY", "BOARD", "ENGINEER"], 4,
+        ntk=["CISO", "SECURITY", "BOARD"],
+        meta={"partial_for": ["ENGINEER"]},
+    )
+    ciso = _sess(["CISO", "SECURITY", "EMPLOYEE"], 4)
+    assert evaluate(chunk, ciso).decision == "allow"
+
+
+def test_partial_vs_full_precedence_full_wins():
+    # A session holding BOTH a full need-to-know role AND a partial role must get
+    # full ALLOW, never downgraded to partial (Batch B review Minor).
+    from rag_engine.governance.access import evaluate
+    chunk = _chunk(
+        "H", ["CISO", "SECURITY", "BOARD", "ENGINEER"], 2,
+        ntk=["CISO", "SECURITY", "BOARD"],
+        meta={"partial_for": ["ENGINEER"]},
+    )
+    dual = _sess(["ENGINEER", "SECURITY", "EMPLOYEE"], 4)
+    assert evaluate(chunk, dual).decision == "allow"
+
+
+def test_non_partial_session_still_denied():
+    # Neither full nor partial role -> denied (fail-closed).
+    from rag_engine.governance.access import evaluate
+    chunk = _chunk(
+        "H", ["CISO", "SECURITY", "BOARD", "ENGINEER"], 2,
+        ntk=["CISO", "SECURITY", "BOARD"],
+        meta={"partial_for": ["ENGINEER"]},
+    )
+    analyst = _sess(["DATA_ANALYST", "EMPLOYEE"], 2)
+    assert evaluate(chunk, analyst).decision == "deny"

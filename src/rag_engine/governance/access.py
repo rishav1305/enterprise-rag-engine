@@ -61,7 +61,9 @@ def evaluate(chunk: EnrichedChunk, session: Session) -> GovernanceDecision:
     # --- need-to-know gate (non-monotonic) -------------------------------
     ntk = set(sec.need_to_know_roles)
     if ntk and roles.isdisjoint(ntk):
-        # partial leg: session role explicitly scoped for this chunk
+        # PRECEDENCE: this branch is reached only when the session has NO full
+        # need-to-know role, so a dual-role holder (full + partial) skips it and
+        # falls through to ALLOW below. Full access always wins over partial.
         partial_for = (
             set(chunk.metadata.get("partial_for", [])) if chunk.metadata else set()
         )
