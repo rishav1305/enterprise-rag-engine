@@ -72,7 +72,7 @@ def test_anchors_memoized_stable():
 
 # ---- personas + access matrix ------------------------------------------
 def test_persona_roster_count():
-    assert len(PERSONAS) == 14  # world bible §4 (incl. Strategist)
+    assert len(PERSONAS) == 15  # world bible §4 (incl. Strategist + HR Analyst)
 
 
 def test_scenario_6_strategist_vs_sales_manager_on_mna():

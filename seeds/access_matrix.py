@@ -21,9 +21,12 @@ class Decision(str, Enum):
     ALLOW = "allow"
     MASK = "mask"
     DENY = "deny"
-    # TODO(P0.1b): no PARTIAL decision yet — §5 marks Engineer/H "partial" (sees some
-    # security tickets, not all). Currently collapsed to DENY for Engineer. Model
-    # partial/row-scoped access when the catalog carries per-ticket ACLs.
+    # NB: this oracle (the seeds-side ground truth) intentionally has NO PARTIAL —
+    # it scores asset-level class access, where Engineer/H has no scoped grant, so
+    # it collapses to DENY here. The ENGINE implements PARTIAL (rag_engine.governance
+    # .access) for row-scoped grants when a chunk carries partial_for metadata; the
+    # oracle-binding test (tests/test_leak_oracle.py) drives chunks WITHOUT that
+    # metadata, so engine and oracle agree exactly (no partial cells in the matrix).
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,11 +52,15 @@ CLASSES: dict[str, SensitivityClass] = {
     # C1: BOARD satisfies H so the CEO ("sees everything") is admitted; CISO/SECURITY
     # are the operational need-to-know. CFO lacks all three -> CFO✗H (correct).
     "H": SensitivityClass("H", "Security incidents", 4, ("CISO", "SECURITY", "BOARD")),
-    # re-included domains (P0.1a expanded scope)
-    "I": SensitivityClass("I", "Payroll (individual)", 5, ("FINANCE", "C_SUITE")),
-    "J": SensitivityClass("J", "Benefits (PII)", 2),
-    "K": SensitivityClass("K", "Recruiting/ATS (candidate PII; offer comp L4)", 3),
-    "L": SensitivityClass("L", "Expenses", 2),
+    # re-included domains (P0.1a) — need-to-know tightened to the OWNING vertical's
+    # role(s), level alone insufficient (CEO directive 2026-06-09). Owners per
+    # world-bible §3/§7: payroll/benefits/recruiting = People/HR; expenses/tax/
+    # treasury = Finance. C_SUITE included so the executive personas (CFO/CEO) see
+    # them. Levels match §7 (benefits L4 health-PII; payroll L5 ties-to-comp).
+    "I": SensitivityClass("I", "Payroll (individual)", 5, ("HR", "C_SUITE")),
+    "J": SensitivityClass("J", "Benefits (health PII)", 4, ("HR", "C_SUITE")),
+    "K": SensitivityClass("K", "Recruiting/ATS (candidate PII)", 3, ("HR", "C_SUITE")),
+    "L": SensitivityClass("L", "Expenses", 2, ("FINANCE", "C_SUITE")),
     "M": SensitivityClass("M", "Tax (pre-filing)", 5, ("FINANCE", "C_SUITE")),
     "N": SensitivityClass("N", "Treasury (material non-public)", 5, ("FINANCE", "C_SUITE")),
 }

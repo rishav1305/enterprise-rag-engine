@@ -39,7 +39,7 @@ def generate(manifest: Manifest, scale: float = 1.0) -> SourceOutput:
         vertical="PEOPLE",
         retrieval_mode="structured",
         sensitivity_class="J",
-        clearance_level=2,
+        clearance_level=4,  # §7: health PII -> L4 + HR need-to-know
         owner_department="PEOPLE",
         fields=(
             FieldSpec("enrollment_id", "str"),

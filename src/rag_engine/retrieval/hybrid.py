@@ -12,8 +12,6 @@ data was genuinely findable and was blocked by policy, not merely missed.
 
 from __future__ import annotations
 
-import numpy as np
-
 from ..config import EngineConfig
 from ..schemas import EnrichedChunk, ScoredChunk
 from .base import Embedder, Reranker, VectorStore

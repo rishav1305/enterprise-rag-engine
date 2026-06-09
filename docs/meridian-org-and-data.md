@@ -59,12 +59,13 @@ A `SecurityContext` (frozen Pydantic model in the engine) carries `allowed_roles
 | Persona | Vertical | Level | Notes |
 |---|---|---|---|
 | **Intern** | Knowledge/Support | L1 | the adversarial-leak protagonist |
-| **Support Agent** | Knowledge/Support | L1 | customer-facing; sees masked PII |
+| **Support Agent** | Knowledge/Support | L2 | customer-facing; own-queue team-ops (C) + masked customer PII (D) |
 | **Data Analyst** | Engineering/Data | L2 | queries the warehouse; the text-to-SQL user |
 | **Ops Analyst** | Mobility Ops | L2 | trip aggregates |
 | **Commerce Analyst** | Marketplace | L2 | sales analytics |
 | **Marketing Analyst** | Marketing | L2 | campaign data; masked customer emails |
 | **Engineer** | Engineering | L2 | runbooks, tickets, error codes (lexical user) |
+| **HR Analyst** | People/HR | L4 | owns People PII — benefits (J), recruiting (K); **not** exec comp (F) or payroll (I) (golden scenario #3) |
 | **Sales Manager** | Sales | L3 | pipeline, deal values |
 | **Finance Manager** | Finance | L4 | financials — **not** comp |
 | **Legal Counsel** | Legal | L4 | contracts, M&A — **not** financials/comp |
@@ -77,24 +78,32 @@ A `SecurityContext` (frozen Pydantic model in the engine) carries `allowed_roles
 
 ## 5. Access matrix (the governance core — deliberately non-monotonic)
 
-Asset sensitivity classes: **A** Public (L0) · **B** Employee-general (L1) · **C** Team-ops (L2) · **D** Customer-PII (L3, masked below L4) · **E** Pre-release financials (**L4+, FINANCE/C-suite need-to-know**) · **F** Exec comp (L5) · **G** Legal/M&A (L4–L5) · **H** Security incidents (L4).
+Asset sensitivity classes (level **AND** owning-role need-to-know unless noted open):
+- **A** Public (L0, open) · **B** Employee-general (L1, open) · **C** Team-ops (L2, open) · **D** Customer-PII (L3, masked below L4)
+- **E** Pre-release financials (L4+, FINANCE/C-suite) · **F** Exec comp (L5, C-suite) · **G** Legal/M&A (L4+, LEGAL/STRATEGY/C-suite) · **H** Security incidents (L4+, CISO/SECURITY/BOARD)
+- **I** Payroll (L5, **HR**/C-suite) · **J** Benefits/health-PII (L4, **HR**/C-suite) · **K** Recruiting/candidate-PII (L3, **HR**/C-suite) · **L** Expenses (L2, **FINANCE**/C-suite) · **M** Tax pre-filing (L5, FINANCE/C-suite) · **N** Treasury (L5, FINANCE/C-suite)
 
-| Persona | A | B | C | D | E | F | G | H |
-|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
-| Intern | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| Support Agent | ✓ | ✓ | own queue | **masked** | ✗ | ✗ | ✗ | ✗ |
-| Data/Ops/Commerce Analyst | ✓ | ✓ | ✓ | **masked** | ✗ | ✗ | ✗ | ✗ |
-| Marketing Analyst | ✓ | ✓ | ✓ | **masked** | ✗ | ✗ | ✗ | ✗ |
-| Engineer | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | partial |
-| Sales Manager | ✓ | ✓ | ✓ | ✓ (raw) | ✗ | ✗ | ✗ | ✗ |
-| Finance Manager | ✓ | ✓ | ✓ | ✓ | ✓ | **✗** | ✗ | ✗ |
-| Legal Counsel | ✓ | ✓ | ✓ | ✓ | **✗** | **✗** | ✓ | ✗ |
-| Strategist | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | **✓** | ✗ |
-| CISO | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✓ |
-| CFO | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |
-| CEO | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+Re-included function-specific classes (I–N) require the **owning vertical's role**, not clearance level alone (governance tightening 2026-06-09): People/HR owns I/J/K; Finance owns L/M/N. An L2 analyst no longer reads benefits (J) or expenses (L) by level.
 
-**The point:** Finance Manager has high clearance but **cannot** see exec comp (F); Legal has high clearance but **cannot** see financials (E) or comp (F); HR can see comp bands but not pre-release financials. Access = **level AND role/need-to-know**, never level alone. This is what makes the leak audit meaningful.
+| Persona | A | B | C | D | E | F | G | H | I | J | K | L | M | N |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
+| Intern | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Support Agent | ✓ | ✓ | ✓ (own queue) | **masked** | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Data/Ops/Commerce Analyst | ✓ | ✓ | ✓ | **masked** | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Marketing Analyst | ✓ | ✓ | ✓ | **masked** | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Engineer | ✓ | ✓ | ✓ | **masked** | ✗ | ✗ | ✗ | partial | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| **HR Analyst** | ✓ | ✓ | ✓ | ✓ | ✗ | **✗** | ✗ | ✗ | **✗** | **✓** | **✓** | ✗ | ✗ | ✗ |
+| Sales Manager | ✓ | ✓ | ✓ | **masked** | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Finance Manager | ✓ | ✓ | ✓ | ✓ | ✓ | **✗** | ✗ | ✗ | ✗ | ✗ | ✗ | **✓** | ✗ | ✗ |
+| Legal Counsel | ✓ | ✓ | ✓ | ✓ | **✗** | **✗** | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Strategist | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | **✓** | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| CISO | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| CFO | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| CEO | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+**The point:** Finance Manager has high clearance but **cannot** see exec comp (F) or HR benefits/payroll (J/I — wrong function); Legal has high clearance but **cannot** see financials (E) or comp (F); HR Analyst sees benefits/recruiting (J/K) but **not** exec comp (F, L5) or financials (E). Access = **level AND role/need-to-know**, never level alone. This is what makes the leak audit meaningful.
+
+> **Customer-PII (class D) is masked, not raw, below L4 — including for Sales Manager (L3).** Earlier drafts gave Sales Manager raw D; the implementation masks it (least-privilege/SECURE pillar): the row is still returned, with PII redacted. Raw customer PII requires L4+. Pinned by `tests/test_leak_oracle.py::test_sales_manager_customer_pii_is_masked_not_raw`.
 
 ---
 
@@ -187,4 +196,4 @@ Generators will live in `seeds/` (per-source modules) and write into SurrealDB C
 
 ---
 
-*Status 2026-06-08: org + full data estate documented (11 verticals, **14 personas** incl. Strategist, 7 real sources, **16 synthetic sources**, opaque-schema seed, access matrix, 8 golden leak-audit scenarios). Drives the catalog, connectors, masking policies, and synthetic generators. Build owned by Shuri; P0.1a in execution.*
+*Status 2026-06-09: org + full data estate documented (11 verticals, **15 personas** incl. Strategist + HR Analyst, 7 real sources, **16 synthetic sources**, opaque-schema seed, access matrix with owning-role need-to-know on classes E–N, 8 golden leak-audit scenarios). Drives the catalog, connectors, masking policies, and synthetic generators. Build owned by Shuri; P0.1b governance tightening in review.*

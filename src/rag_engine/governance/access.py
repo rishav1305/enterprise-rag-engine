@@ -1,15 +1,24 @@
-"""Access decisioning — the single source of truth for 'can this session read this chunk?'.
+"""Access decisioning — the single source of truth for 'can this session read this?'.
 
-The rule is deliberately strict and easy to audit:
-  1. A public chunk (clearance 0 and no restricting roles) is always allowed.
-  2. Otherwise the session's clearance must be >= the chunk's clearance level,
-     AND the session must hold at least one of the chunk's allowed roles.
-Both conditions must hold. Fail-closed: anything ambiguous is denied.
+Governance-v2 (P0.1b) extends the original binary allow/deny to four decisions:
+
+  * ``allow``   — full access.
+  * ``mask``    — admitted but PII/secured columns are redacted (customer-PII class D
+                  for L2-L3; raw only at L4+). The row still reaches the model masked.
+  * ``partial`` — row-scoped access (e.g. Engineer sees own-component security tickets).
+  * ``deny``    — dropped before the model + audited.
+
+The rule stays strict, auditable, and fail-closed. It is BACKWARD COMPATIBLE:
+chunks with no ``sensitivity_class`` fall through to the original level +
+allowed_roles gate, so the existing INTERN-vs-CFO leak demo behaves identically.
 """
 
 from __future__ import annotations
 
 from ..schemas import EnrichedChunk, GovernanceDecision, Session
+
+# class D (customer PII): mask for L2-L3, raw at L4+, deny below L2.
+_PII_CLASS = "D"
 
 
 def evaluate(chunk: EnrichedChunk, session: Session) -> GovernanceDecision:
@@ -24,18 +33,58 @@ def evaluate(chunk: EnrichedChunk, session: Session) -> GovernanceDecision:
     if sec.is_public:
         return GovernanceDecision(decision="allow", reason="public_content", **base)
 
-    if session.clearance_level < sec.clearance_level:
+    cls = sec.sensitivity_class
+    level = session.clearance_level
+    roles = set(session.roles)
+
+    # --- masking leg: customer PII (class D) -----------------------------
+    if cls == _PII_CLASS:
+        if level >= 4:
+            return GovernanceDecision(decision="allow", reason="pii_cleared", **base)
+        if level >= 2:
+            return GovernanceDecision(
+                decision="mask", reason="pii_masked", mask_reason="pii_mask", **base
+            )
+        return GovernanceDecision(decision="deny", reason="pii_below_min_level", **base)
+
+    # --- level gate ------------------------------------------------------
+    if level < sec.clearance_level:
         return GovernanceDecision(
             decision="deny",
             reason=(
                 f"insufficient_clearance "
-                f"(session L{session.clearance_level} < required L{sec.clearance_level})"
+                f"(session L{level} < required L{sec.clearance_level})"
             ),
             **base,
         )
 
-    session_roles = set(session.roles)
-    if session_roles.isdisjoint(sec.allowed_roles):
+    # --- need-to-know gate (non-monotonic) -------------------------------
+    ntk = set(sec.need_to_know_roles)
+    if ntk and roles.isdisjoint(ntk):
+        # PRECEDENCE: this branch is reached only when the session has NO full
+        # need-to-know role, so a dual-role holder (full + partial) skips it and
+        # falls through to ALLOW below. Full access always wins over partial.
+        partial_for = (
+            set(chunk.metadata.get("partial_for", [])) if chunk.metadata else set()
+        )
+        if partial_for and roles & partial_for:
+            return GovernanceDecision(
+                decision="partial", reason="scoped_access", scope="own_component", **base
+            )
+        return GovernanceDecision(
+            decision="deny",
+            reason=f"need_to_know (need one of {sorted(ntk)})",
+            **base,
+        )
+
+    # --- allowed_roles gate (LEGACY path — un-classed chunks only) -------
+    # Classed chunks are governed by the level + need-to-know gates above; a
+    # classed chunk that reaches here (level OK, need-to-know satisfied or absent)
+    # is allowed — a level-only class (empty need-to-know, e.g. B/C/J/L) must NOT
+    # be denied for lacking a role (that was the _CLASS_ROLES drift bug). For
+    # un-classed legacy chunks we keep the original fail-closed role gate: a
+    # non-public chunk with empty allowed_roles is disjoint and therefore denied.
+    if not cls and roles.isdisjoint(sec.allowed_roles):
         return GovernanceDecision(
             decision="deny",
             reason=f"role_mismatch (need one of {sec.allowed_roles})",
@@ -43,7 +92,5 @@ def evaluate(chunk: EnrichedChunk, session: Session) -> GovernanceDecision:
         )
 
     return GovernanceDecision(
-        decision="allow",
-        reason="clearance_and_role_satisfied",
-        **base,
+        decision="allow", reason="clearance_and_role_satisfied", **base
     )
