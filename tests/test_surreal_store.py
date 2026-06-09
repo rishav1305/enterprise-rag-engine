@@ -69,3 +69,24 @@ def test_surreal_store_applies_ddl_and_roundtrips(surreal_local):
                      "retrieval_mode": "vector"})
     assert st.count_assets() == 1
     st.close()
+
+
+# ---- Task 4: estate -> SurrealDB target --------------------------------
+def test_load_estate_into_surreal(surreal_local):
+    from rag_engine.store.surreal import SurrealStore
+    from seeds.targets.surreal_target import load_estate
+    st = SurrealStore(dsn=surreal_local["dsn"], ns=surreal_local["ns"], db="estate",
+                      user="root", password="root")
+    st.connect()
+    st.apply_schema()
+    n = load_estate(st, scale=0.01)
+    assert n == 25  # all catalog assets present
+    pay = st.get_asset("payments_ledger")
+    assert pay["cls"] == "D"
+    assert pay["level"] == 4
+    # columns carried through for masking policy
+    assert any(c["name"] == "gov_id" and c["masked"] for c in pay["columns"])
+    # idempotent reload (no duplicates)
+    assert load_estate(st, scale=0.01) == 25
+    assert st.count_assets() == 25
+    st.close()
