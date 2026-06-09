@@ -28,13 +28,13 @@ from .synthetic import (
     payroll, procurement, recruiting, slack, support, tax, telemetry, treasury,
 )
 from .real.sources import FIXTURES
-from .synthetic import tickets
+from .synthetic import security_incidents, tickets
 
 
 def _synthetic_mods():
     return [
         hr, payroll, benefits, recruiting, crm, slack, support, tickets,
-        procurement, legacy_mart, telemetry,
+        procurement, legacy_mart, telemetry, security_incidents,
         # finance cluster (depend on _coherence) last
         financials, payments, expenses, tax, treasury, legal,
     ]
