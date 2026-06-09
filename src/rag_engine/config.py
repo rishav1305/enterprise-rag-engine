@@ -30,6 +30,18 @@ class EngineConfig:
         default_factory=lambda: os.getenv("RAG_ANTHROPIC_MODEL", "claude-3-5-haiku-latest")
     )
 
+    # store backend (P0.2a) — "memory" (in-process, default) | "surrealdb".
+    # Multi-setup: the same DDL serves a local self-host instance (CI/dev) AND
+    # SurrealDB Cloud — only the DSN/creds differ, all env-driven (CONFIGURABLE).
+    store_backend: str = field(default_factory=lambda: os.getenv("RAG_STORE_BACKEND", "memory"))
+    surreal_dsn: str = field(
+        default_factory=lambda: os.getenv("SURREAL_DSN", "ws://127.0.0.1:8000/rpc")
+    )
+    surreal_ns: str = field(default_factory=lambda: os.getenv("SURREAL_NS", "meridian"))
+    surreal_db: str = field(default_factory=lambda: os.getenv("SURREAL_DB", "clearance"))
+    surreal_user: str = field(default_factory=lambda: os.getenv("SURREAL_USER", "root"))
+    surreal_pass: str = field(default_factory=lambda: os.getenv("SURREAL_PASS", "root"))
+
     @property
     def use_anthropic(self) -> bool:
         return bool(os.getenv("ANTHROPIC_API_KEY"))
