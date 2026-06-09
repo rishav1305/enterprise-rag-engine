@@ -75,3 +75,59 @@ def test_build_index_and_roundtrip_vectors_to_surreal(surreal_local, tmp_path):
     loaded = TurboVecIndex.load(out)
     assert len(loaded) == n
     st.close()
+
+
+# ---- test-hardening (robust directive) ---------------------------------
+def test_add_length_mismatch_raises():
+    idx = TurboVecIndex(dim=8)
+    v = _unit(3, 8, 0)
+    with pytest.raises(ValueError):
+        idx.add(["chunk:a", "chunk:b"], v)  # 2 ids, 3 vectors
+
+
+def test_allowlist_with_ids_not_in_index_are_dropped_no_raise():
+    v = _unit(20, 8, 5)
+    ids = [f"chunk:{i}" for i in range(20)]
+    idx = TurboVecIndex(dim=8)
+    idx.add(ids, v)
+    # allowlist is a superset of the index (includes unknown ids) -> unknowns
+    # dropped silently, known ones still searched (no KeyError).
+    allow = ["chunk:0", "chunk:2", "chunk:99999", "chunk:does-not-exist"]
+    hits = idx.search(v[0], k=5, allowlist_chunk_ids=allow)
+    assert {h.chunk_id for h in hits} <= {"chunk:0", "chunk:2"}
+
+
+def test_allowlist_score_parity_with_unfiltered_restricted():
+    # filtered authorized hits == (unfiltered top results restricted to allow)[:k]
+    v = _unit(60, 16, 6)
+    ids = [f"chunk:{i}" for i in range(60)]
+    idx = TurboVecIndex(dim=16)
+    idx.add(ids, v)
+    allow = [f"chunk:{i}" for i in range(0, 60, 2)]
+    filtered = idx.search(v[0], k=5, allowlist_chunk_ids=allow)
+    # unfiltered, then restrict to the allowlist, preserving rank order
+    unfiltered = idx.search(v[0], k=60)
+    restricted = [h for h in unfiltered if h.chunk_id in set(allow)][:5]
+    assert [h.chunk_id for h in filtered] == [h.chunk_id for h in restricted]
+
+
+def test_add_and_search_dim_mismatch_raise():
+    idx = TurboVecIndex(dim=16)
+    idx.add([f"chunk:{i}" for i in range(5)], _unit(5, 16, 8))
+    with pytest.raises(ValueError):
+        idx.add(["x", "y"], _unit(2, 8, 9))            # wrong-dim add
+    with pytest.raises(ValueError):
+        idx.search(_unit(1, 8, 10)[0], k=3)             # wrong-dim query
+
+
+def test_load_with_dim_override(tmp_path):
+    v = _unit(40, 32, 7)
+    ids = [f"chunk:{i}" for i in range(40)]
+    idx = TurboVecIndex(dim=32)
+    idx.add(ids, v)
+    out = str(tmp_path / "ovr.tvim")
+    idx.write(out)
+    # explicit dim override branch on load
+    loaded = TurboVecIndex.load(out, dim=32)
+    assert loaded.dim == 32
+    assert "chunk:0" in [h.chunk_id for h in loaded.search(v[0], k=3)]
