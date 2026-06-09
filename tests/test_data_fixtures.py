@@ -156,6 +156,28 @@ def test_estate_has_all_sources():
     assert sum(1 for a in manifest.assets if not a.synthetic) == 7
 
 
+def test_asset_clearance_matches_its_class_min_level():
+    # An asset's declared clearance_level must equal its sensitivity class's
+    # min_level — otherwise the asset-level gate diverges from the oracle (this
+    # caught prerelease_financials declaring L5 while class E is L4). The catalog
+    # SecurityContext inherits the asset level, so they must agree.
+    #
+    # Class D (customer-PII) is EXEMPT: its governance is the masking leg, which
+    # keys off the *session* level (mask L2-3, raw L4+), independent of the
+    # asset's declared level — so a D asset may declare its raw-access level (e.g.
+    # payments KYC raw at L4) without affecting the oracle.
+    from seeds.access_matrix import CLASSES
+    manifest, _ = build_estate(scale=_SCALE)
+    for a in manifest.assets:
+        if a.sensitivity_class == "D":
+            continue
+        expected = CLASSES[a.sensitivity_class].min_level
+        assert a.clearance_level == expected, (
+            f"{a.asset_id}: declared L{a.clearance_level} != class "
+            f"{a.sensitivity_class} min_level L{expected}"
+        )
+
+
 def test_estate_reproducible_byte_identical(tmp_path):
     # THE HARD GATE: emit twice -> byte-identical manifest + rows + oracle
     s1 = emit(tmp_path / "run1", scale=_SCALE)

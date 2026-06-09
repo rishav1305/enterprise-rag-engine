@@ -57,8 +57,8 @@ def generate(manifest: Manifest, scale: float = 1.0, n_suppliers: int = 2_000,
         connector="ERP / procurement",
         vertical="MOBILITY_OPS",
         retrieval_mode="graph",
-        sensitivity_class="C",  # supplier list L1; contract terms L3 via field ACL
-        clearance_level=1,
+        sensitivity_class="C",  # team-ops L2; contract terms L3 via field ACL (column-level)
+        clearance_level=2,      # matches class C min_level (asset-level inherits class)
         owner_department="LEGAL",
         fields=(
             FieldSpec("id", "str"),
