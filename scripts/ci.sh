@@ -58,6 +58,7 @@ SKIPS=$(PYTHONPATH=src "$PYTHON" -m pytest -m "not cloud" -rs -q \
     tests/test_turbovec_index.py tests/test_allowlist_prefilter.py \
     tests/test_turbovec_recall.py tests/test_oracle_parity.py \
     tests/test_surreal_store.py tests/test_surreal_connector.py \
+    tests/test_turbovec_retriever_unit.py tests/test_c1_over_vector_e2e.py \
     tests/test_ci_dependency_guard.py 2>&1 | grep -c -E '^SKIPPED' || true)
 if [ "$SKIPS" -ne 0 ]; then
     echo "FAIL: $SKIPS headline test(s) skipped — false-green risk." >&2
