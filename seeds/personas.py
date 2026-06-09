@@ -31,6 +31,11 @@ PERSONAS: tuple[Persona, ...] = (
     Persona("commerce_analyst", "Commerce Analyst", "COMMERCE", 2, ("COMMERCE_ANALYST", "EMPLOYEE")),
     Persona("marketing_analyst", "Marketing Analyst", "MARKETING", 2, ("MARKETING_ANALYST", "EMPLOYEE")),
     Persona("engineer", "Engineer", "ENGINEERING", 2, ("ENGINEER", "EMPLOYEE")),
+    # HR Analyst (People/HR, L4): owns People PII (J benefits L4 health-PII,
+    # K recruiting L3) — holds HR need-to-know AND meets their levels. Payroll (I,
+    # L5) + exec comp (F, L5/C_SUITE) stay above HR Analyst -> still denied those
+    # (golden scenario #3: HR Analyst asks for exec comp -> DROP). §3.5 + §9.
+    Persona("hr_analyst", "HR Analyst", "PEOPLE", 4, ("HR", "EMPLOYEE")),
     Persona("sales_manager", "Sales Manager", "SALES", 3, ("SALES_MANAGER", "EMPLOYEE")),
     Persona("finance_manager", "Finance Manager", "FINANCE", 4, ("FINANCE", "FINANCE_MANAGER", "EMPLOYEE")),
     Persona("legal_counsel", "Legal Counsel", "LEGAL", 4, ("LEGAL", "EMPLOYEE")),

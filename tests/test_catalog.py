@@ -84,6 +84,11 @@ def test_class_roles_no_drift_from_access_matrix():
             f"class {code} role drift: {_CLASS_ROLES[code]} != {list(sc.need_to_know_roles)}"
         )
         assert _CLASS_LEVEL[code] == sc.min_level
-    # explicit: level-only classes carry NO injected roles
-    for code in ("B", "C", "D", "J", "K", "L"):
+    # explicit: genuinely-open classes carry NO need-to-know roles. (J/K/L are now
+    # need-to-know-gated to their owning vertical per the 2026-06-09 governance
+    # tightening, so they are intentionally NOT in this open list.)
+    for code in ("B", "C", "D"):
         assert _CLASS_ROLES[code] == []
+    # function-specific sensitive classes ARE gated to their owning role(s)
+    assert _CLASS_ROLES["J"] == ["HR", "C_SUITE"]      # benefits -> People/HR
+    assert _CLASS_ROLES["L"] == ["FINANCE", "C_SUITE"]  # expenses -> Finance

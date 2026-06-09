@@ -52,11 +52,15 @@ CLASSES: dict[str, SensitivityClass] = {
     # C1: BOARD satisfies H so the CEO ("sees everything") is admitted; CISO/SECURITY
     # are the operational need-to-know. CFO lacks all three -> CFO✗H (correct).
     "H": SensitivityClass("H", "Security incidents", 4, ("CISO", "SECURITY", "BOARD")),
-    # re-included domains (P0.1a expanded scope)
-    "I": SensitivityClass("I", "Payroll (individual)", 5, ("FINANCE", "C_SUITE")),
-    "J": SensitivityClass("J", "Benefits (PII)", 2),
-    "K": SensitivityClass("K", "Recruiting/ATS (candidate PII; offer comp L4)", 3),
-    "L": SensitivityClass("L", "Expenses", 2),
+    # re-included domains (P0.1a) — need-to-know tightened to the OWNING vertical's
+    # role(s), level alone insufficient (CEO directive 2026-06-09). Owners per
+    # world-bible §3/§7: payroll/benefits/recruiting = People/HR; expenses/tax/
+    # treasury = Finance. C_SUITE included so the executive personas (CFO/CEO) see
+    # them. Levels match §7 (benefits L4 health-PII; payroll L5 ties-to-comp).
+    "I": SensitivityClass("I", "Payroll (individual)", 5, ("HR", "C_SUITE")),
+    "J": SensitivityClass("J", "Benefits (health PII)", 4, ("HR", "C_SUITE")),
+    "K": SensitivityClass("K", "Recruiting/ATS (candidate PII)", 3, ("HR", "C_SUITE")),
+    "L": SensitivityClass("L", "Expenses", 2, ("FINANCE", "C_SUITE")),
     "M": SensitivityClass("M", "Tax (pre-filing)", 5, ("FINANCE", "C_SUITE")),
     "N": SensitivityClass("N", "Treasury (material non-public)", 5, ("FINANCE", "C_SUITE")),
 }

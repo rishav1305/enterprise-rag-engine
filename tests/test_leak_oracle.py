@@ -98,3 +98,57 @@ def test_i2_intern_protagonist_unaffected():
     # the adversarial-leak protagonist stays L1 -> denied C and D.
     assert _decision("intern", "C") == "deny"
     assert _decision("intern", "D") == "deny"
+
+
+# ---- 2026-06-09 governance tightening: need-to-know on function-specific PII ---
+def test_benefits_J_requires_hr_need_to_know():
+    # J (benefits, health PII, L4 + HR) — owning role allowed; level-peers denied.
+    assert _decision("hr_analyst", "J") == "allow"     # owns People PII
+    assert _decision("support_agent", "J") == "deny"   # L2, no HR
+    assert _decision("finance_manager", "J") == "deny"  # L4 but no HR need-to-know
+    assert _decision("cfo", "J") == "allow"            # C_SUITE sees People PII
+
+
+def test_recruiting_K_requires_hr_need_to_know():
+    assert _decision("hr_analyst", "K") == "allow"
+    assert _decision("data_analyst", "K") == "deny"    # L2, no HR
+    assert _decision("sales_manager", "K") == "deny"   # L3 but no HR
+
+
+def test_expenses_L_requires_finance_need_to_know():
+    assert _decision("finance_manager", "L") == "allow"
+    assert _decision("data_analyst", "L") == "deny"    # L2, no FINANCE
+    assert _decision("marketing_analyst", "L") == "deny"
+    assert _decision("cfo", "L") == "allow"
+
+
+def test_payroll_I_is_hr_csuite_and_l5():
+    # Payroll is People-owned (HR/C_SUITE), L5 — HR Analyst (L4) denied by level.
+    assert _decision("hr_analyst", "I") == "deny"
+    assert _decision("finance_manager", "I") == "deny"  # L4 + no level + (no HR)
+    assert _decision("cfo", "I") == "allow"            # L5 C_SUITE
+    assert _decision("ceo", "I") == "allow"
+
+
+def test_tax_treasury_M_N_finance_gated():
+    # M/N are L5 + FINANCE/C_SUITE: only C-suite finance reaches them.
+    for cls in ("M", "N"):
+        assert _decision("cfo", cls) == "allow"            # L5 + FINANCE
+        assert _decision("ceo", cls) == "allow"            # L5 C_SUITE
+        assert _decision("finance_manager", cls) == "deny"  # L4 < L5 (level)
+        assert _decision("data_analyst", cls) == "deny"
+        assert _decision("legal_counsel", cls) == "deny"   # L4 + no FINANCE
+
+
+def test_hr_analyst_golden_scenario_3_exec_comp_dropped():
+    # §9 #3: HR Analyst asks for exec comp -> DROP F (L5/C_SUITE); HR still denied.
+    assert _decision("hr_analyst", "F") == "deny"
+    assert _decision("hr_analyst", "E") == "deny"  # and financials (no FINANCE)
+
+
+def test_genuinely_open_classes_unchanged():
+    # A/B/C/D stay open (level-only / masking) — tightening only touched I-N.
+    assert _decision("intern", "A") == "allow"
+    assert _decision("intern", "B") == "allow"
+    assert _decision("data_analyst", "C") == "allow"
+    assert _decision("marketing_analyst", "D") == "mask"
