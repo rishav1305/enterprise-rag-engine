@@ -32,6 +32,9 @@ where = ["src"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "cloud: tests that hit SurrealDB Cloud (creds-gated; run with -m cloud). CI runs -m 'not cloud'.",
+]
 
 [tool.ruff]
 line-length = 100
