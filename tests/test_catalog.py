@@ -34,7 +34,7 @@ def test_seed_connector_yields_catalog_assets():
     assets = list(conn.discover())
     ids = {a.asset_id for a in assets}
     # P0.1a estate: 18 synthetic + 7 real = 25 catalog assets
-    assert len(assets) == 25
+    assert len(assets) == 26
     assert "hr_records" in ids and "legacy_mart_tbl_71" in ids and "nyc_tlc_trips" in ids
     hr = next(a for a in assets if a.asset_id == "hr_records")
     assert hr.sensitivity_class == "F"
@@ -46,7 +46,7 @@ def test_registry_loads_and_queries_by_vertical_and_class():
     from rag_engine.catalog.registry import CatalogRegistry
     reg = CatalogRegistry()
     n = reg.load(SeedConnector(scale=0.01))
-    assert n == 25
+    assert n == 26
     assert reg.get("hr_records").sensitivity_class == "F"
     finance = reg.by_vertical("FINANCE")
     assert {a.asset_id for a in finance} >= {"prerelease_financials", "payments_ledger"}

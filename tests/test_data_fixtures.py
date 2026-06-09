@@ -150,10 +150,19 @@ def test_all_classes_present():
 # ---- Wave 3: full-estate reproducibility + coherence + masking ---------
 def test_estate_has_all_sources():
     manifest, outputs = build_estate(scale=_SCALE)
-    # 18 synthetic assets (16 sources; legacy_mart splits into tbl_44 + tbl_71) + 7 real
-    assert len(manifest.assets) == 25
-    assert sum(1 for a in manifest.assets if a.synthetic) == 18
+    # 19 synthetic (17 sources; legacy_mart splits into tbl_44+tbl_71) + 7 real = 26.
+    # (+security_incidents class-H asset added in P0.2b T-H.)
+    assert len(manifest.assets) == 26
+    assert sum(1 for a in manifest.assets if a.synthetic) == 19
     assert sum(1 for a in manifest.assets if not a.synthetic) == 7
+
+
+def test_security_incidents_class_H_asset_present():
+    manifest, _ = build_estate(scale=_SCALE)
+    h = [a for a in manifest.assets if a.sensitivity_class == "H"]
+    assert len(h) == 1 and h[0].asset_id == "security_incidents"
+    assert h[0].clearance_level == 4  # class H min_level
+    assert h[0].vertical == "RISK_SECURITY"
 
 
 def test_asset_clearance_matches_its_class_min_level():

@@ -2,9 +2,9 @@
 
 > Most enterprise RAG failures aren't model failures. They're **governance, freshness, lineage, and evaluation** failures — the unglamorous 70%. This repo is built around that 70%.
 
-A modular, production-shaped Retrieval-Augmented Generation engine that treats **access control as a first-class retrieval concern**. It demonstrates the engineering an enterprise operations team actually cares about: a document a user isn't cleared for is *retrievable* (so search quality is honest) but is **dropped before it can ever reach the model** — proven by an adversarial test that fails the CI build on any leak.
+A modular, production-shaped Retrieval-Augmented Generation engine that treats **access control as a first-class retrieval concern**. It demonstrates the engineering an enterprise operations team actually cares about: a document a user isn't cleared for is *retrievable* (so search quality is honest) but is **dropped before it can ever reach the model** — proven by an adversarial test that fails the local CI gate (`make ci`) on any leak.
 
-[![ci](https://img.shields.io/badge/ci-tests%20%2B%20governance%20gate-success)](.github/workflows/ci.yml)
+[![ci](https://img.shields.io/badge/ci-local%20gate%20(make%20ci)-success)](#local-ci-gate)
 [![python](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![runs offline](https://img.shields.io/badge/runs-offline%20%7C%20zero%20model%20downloads-orange)](#quickstart)
@@ -78,12 +78,31 @@ exact governance behaviour. Flip any backend on with one environment variable.
 ## Quickstart
 
 ```bash
-pip install -r requirements.txt        # pure-Python, ~10s
+pip install -r requirements.txt        # pure-Python core, ~10s
 
 make demo        # adversarial leakage walk-through (INTERN vs CFO) + eval gate
-make test        # 21 tests incl. 5 adversarial leakage assertions
+make test        # the full pytest suite
+make ci          # THE local pre-merge gate (see below)
 make api         # FastAPI at http://localhost:8000  (see /docs)
 ```
+
+### Local CI gate
+
+**CI runs locally, not on GitHub Actions** — `make ci` (`scripts/ci.sh`) is THE
+pre-merge gate. It:
+
+- exports `RAG_DEV_ENV=1` (turns the dependency/binary guards into hard failures,
+  so the headline governance/vector tests can never silently skip → no false-green);
+- verifies the **`surreal`** binary is on `PATH` or at `~/.surrealdb/surreal`
+  (the SurrealDB 210-cell parity + store tests require it);
+- asserts the pinned dev deps are importable (`turbovec==0.7.0`, `surrealdb`,
+  `faker`, `polars`, …) — run `make dev` first;
+- runs `pytest -m "not cloud"` and **fails on any unexpected skip** of the
+  headline governance / TurboVec / SurrealDB-parity tests;
+- runs `ruff`.
+
+The `cloud`-marked tests (SurrealDB Cloud) are creds-gated and not part of the
+gate; run them with `pytest -m cloud` when `SURREAL_CLOUD_*` env is set.
 
 Query the API with an identity supplied in headers (server-derived, never
 trusted from the body):

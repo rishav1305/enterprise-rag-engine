@@ -44,7 +44,21 @@ def surreal_local():
          "--bind", f"127.0.0.1:{port}", "memory"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
-    time.sleep(3)  # let the server bind
+    # Readiness poll (RESILIENT): wait until the port accepts a connection rather
+    # than a fixed sleep — faster on warm hosts, robust on slow ones.
+    deadline = time.time() + 15
+    ready = False
+    while time.time() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                ready = True
+                break
+        except OSError:
+            time.sleep(0.1)
+    if not ready:
+        proc.terminate()
+        proc.wait(timeout=10)
+        pytest.fail(f"surreal did not become ready on port {port} within 15s")
     try:
         yield {"dsn": f"ws://127.0.0.1:{port}/rpc", "user": "root",
                "pass": "root", "ns": "meridian", "db": "test"}

@@ -20,7 +20,7 @@ class Persona:
     roles: tuple[str, ...]
 
 
-# world bible §4 — 14 personas (incl. Strategist, fixes golden scenario #6)
+# world bible §4 — 15 personas (incl. Strategist + HR Analyst)
 PERSONAS: tuple[Persona, ...] = (
     Persona("intern", "Intern", "KNOWLEDGE_SUPPORT", 1, ("INTERN", "EMPLOYEE")),
     # L2 (not L1): §4 intent is "customer-facing; sees masked PII" -> needs C (own

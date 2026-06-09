@@ -43,7 +43,7 @@ def test_cloud_estate_load_and_connector_parity():
     st.connect()
     st.apply_schema()
     n = load_estate(st, scale=0.005)
-    assert n == 25
+    assert n == 26
     assert st.get_asset("hr_records")["cls"] == "F"
 
     reg = CatalogRegistry()

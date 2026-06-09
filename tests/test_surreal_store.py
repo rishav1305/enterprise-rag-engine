@@ -80,15 +80,15 @@ def test_load_estate_into_surreal(surreal_local):
     st.connect()
     st.apply_schema()
     n = load_estate(st, scale=0.01)
-    assert n == 25  # all catalog assets present
+    assert n == 26  # all catalog assets present
     pay = st.get_asset("payments_ledger")
     assert pay["cls"] == "D"
     assert pay["level"] == 4
     # columns carried through for masking policy
     assert any(c["name"] == "gov_id" and c["masked"] for c in pay["columns"])
     # idempotent reload (no duplicates)
-    assert load_estate(st, scale=0.01) == 25
-    assert st.count_assets() == 25
+    assert load_estate(st, scale=0.01) == 26
+    assert st.count_assets() == 26
     st.close()
 
 

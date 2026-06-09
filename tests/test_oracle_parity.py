@@ -60,37 +60,44 @@ def _one_asset_per_class(registry):
 
 
 def _run_oracle(registry) -> int:
-    """Return the number of (persona, class) mismatches vs the oracle ground truth."""
+    """Return (mismatches, cells_covered) vs the oracle ground truth.
+
+    With class H now seeded (P0.2b T-H), every one of the 14 classes has an estate
+    asset, so cells_covered must be 14*15 = 210 (no skips) — the full round-trip.
+    """
     oracle = build_oracle()["expectations"]
     by_class = _one_asset_per_class(registry)
     mismatches = 0
+    cells = 0
     for pkey, persona in PERSONAS_BY_KEY.items():
         sess = Session(user_id=pkey, roles=list(persona.roles),
                        clearance_level=persona.clearance_level)
         for cls, expected in oracle[pkey].items():
             asset = by_class.get(cls)
             if asset is None:
-                # class with no asset in this scaled estate — skip (oracle still
-                # covers it via the class-level test elsewhere); both backends
-                # share the same estate so coverage is identical.
-                continue
+                continue  # should not happen now H is seeded — asserted below
+            cells += 1
             chunk = EnrichedChunk(
                 chunk_id=f"c-{cls}", parent_doc_id=asset.asset_id,
                 parent_title="t", content="x", security=asset.security,
             )
             if evaluate(chunk, sess).decision != expected:
                 mismatches += 1
-    return mismatches
+    return mismatches, cells
 
 
 def test_seed_backend_zero_leaks():
-    assert _run_oracle(_registry_seed()) == 0
+    mismatches, cells = _run_oracle(_registry_seed())
+    assert mismatches == 0
+    assert cells == 210  # 15 personas x 14 classes, all classes have an asset
 
 
 def test_surreal_backend_zero_leaks(surreal_local):
     reg, st = _registry_surreal(surreal_local)
     try:
-        assert _run_oracle(reg) == 0
+        mismatches, cells = _run_oracle(reg)
+        assert mismatches == 0
+        assert cells == 210  # full 14-class round-trip through SurrealDB (H seeded)
     finally:
         st.close()
 
