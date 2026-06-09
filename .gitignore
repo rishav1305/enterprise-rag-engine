@@ -16,3 +16,5 @@ htmlcov/
 seeds/_out/
 *.tvim
 .venv-verify/
+
+.venv-p0.2a/

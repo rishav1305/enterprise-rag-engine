@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import shutil
+import socket
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -13,6 +17,40 @@ sys.path.insert(0, str(ROOT / "src"))
 from rag_engine import RAGPipeline, Session  # noqa: E402
 
 CORPUS = ROOT / "corpus"
+
+
+def _free_port() -> int:
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+@pytest.fixture(scope="session")
+def surreal_local():
+    """Ephemeral in-memory SurrealDB for the self-host (CI/dev) path.
+
+    Skips cleanly when the `surreal` binary or the python SDK is unavailable, so
+    a SurrealDB-less CI still runs the rest of the suite.
+    """
+    surreal_bin = shutil.which("surreal") or str(Path.home() / ".surrealdb" / "surreal")
+    if not Path(surreal_bin).exists():
+        pytest.skip("surreal binary not available")
+    pytest.importorskip("surrealdb")
+    port = _free_port()
+    proc = subprocess.Popen(
+        [surreal_bin, "start", "--user", "root", "--pass", "root",
+         "--bind", f"127.0.0.1:{port}", "memory"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    time.sleep(3)  # let the server bind
+    try:
+        yield {"dsn": f"ws://127.0.0.1:{port}/rpc", "user": "root",
+               "pass": "root", "ns": "meridian", "db": "test"}
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)
 
 
 @pytest.fixture(scope="session")

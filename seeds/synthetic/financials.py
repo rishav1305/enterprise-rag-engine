@@ -39,7 +39,7 @@ def generate(manifest: Manifest, scale: float = 1.0) -> SourceOutput:
         vertical="FINANCE",
         retrieval_mode="structured",
         sensitivity_class="E",
-        clearance_level=5,
+        clearance_level=4,  # class E is L4+ (FINANCE/C-suite) — FM sees it (C2 design)
         owner_department="FINANCE",
         fields=(
             FieldSpec("segment", "str"),

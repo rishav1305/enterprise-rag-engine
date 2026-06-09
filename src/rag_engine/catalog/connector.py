@@ -36,6 +36,19 @@ _CLASS_ROLES: dict[str, list[str]] = {
 _CLASS_LEVEL: dict[str, int] = {code: sc.min_level for code, sc in _CLASSES.items()}
 
 
+def column_policy_for(name: str, pii: bool, masked: bool) -> ColumnPolicy:
+    """Single source for column-policy mapping (DRY across connectors).
+
+    mask_reason distinguishes PII redaction from a role-secured (field-ACL) field.
+    """
+    return ColumnPolicy(
+        name=name,
+        pii=pii,
+        masked=masked,
+        mask_reason=("PII_MASK" if pii else ("FIELD_ACL_MASK" if masked else "")),
+    )
+
+
 class Connector(ABC):
     @abstractmethod
     def discover(self) -> Iterator[CatalogAsset]:
@@ -73,15 +86,6 @@ class SeedConnector(Connector):
                 ),
                 sensitivity_class=spec.sensitivity_class,
                 columns=tuple(
-                    ColumnPolicy(
-                        name=f.name,
-                        pii=f.pii,
-                        masked=f.masked,
-                        mask_reason=(
-                            "PII_MASK" if f.pii
-                            else ("FIELD_ACL_MASK" if f.masked else "")
-                        ),
-                    )
-                    for f in spec.fields
+                    column_policy_for(f.name, f.pii, f.masked) for f in spec.fields
                 ),
             )

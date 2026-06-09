@@ -36,8 +36,8 @@ def generate(manifest: Manifest, scale: float = 1.0, n_messages: int = 200_000) 
         connector="Messages (Slack)",
         vertical="KNOWLEDGE_SUPPORT",
         retrieval_mode="vector",
-        sensitivity_class="C",  # channel-scoped; private channels carry higher class via ACL
-        clearance_level=1,
+        sensitivity_class="C",  # team-ops L2; private channels carry higher class via ACL
+        clearance_level=2,      # matches class C min_level (asset-level inherits class)
         owner_department="KNOWLEDGE_SUPPORT",
         fields=(
             FieldSpec("message_id", "str"),
