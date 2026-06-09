@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from ..schemas import GovernanceDecision, ScoredChunk, Session
 from . import access
+from .masking import redact_chunk
 
 
 class SecurityFilter:
@@ -32,8 +33,10 @@ class SecurityFilter:
         for sc in candidates:
             decision = access.evaluate(sc.chunk, session)
             trail.append(decision)
-            # Only DENY is dropped-before-model; allow/mask/partial flow through
-            # (mask/partial carry their redaction/scope on the decision record).
+            # Only DENY is dropped-before-model. allow flows through unchanged;
+            # mask/partial are ADMITTED BUT REDACTED here — the enforcement point —
+            # so generation + citations downstream can only ever see the redaction
+            # token, never the raw value. (C1: masking enforced, not just modeled.)
             if decision.decision != "deny":
-                admitted.append(sc)
+                admitted.append(redact_chunk(sc, decision))
         return admitted, trail

@@ -187,3 +187,65 @@ def test_filter_carries_mask_reason_in_trail():
     analyst = _sess(["MARKETING_ANALYST", "EMPLOYEE"], 2)
     _, trail = SecurityFilter().apply([pii], analyst)
     assert trail[0].mask_reason == "pii_mask"
+
+
+# ---- C1: masking ENFORCED in the filter (content redacted on admit) -----
+_RAW_PII = "Customer jane.doe@example.com phone 555-867-5309 SSN 123-45-6789"
+
+
+def _pii_chunk_with_content(content):
+    from rag_engine.schemas import EnrichedChunk, ScoredChunk, SecurityContext
+    return ScoredChunk(chunk=EnrichedChunk(
+        chunk_id="c-pii", parent_doc_id="support_tickets", parent_title="Support",
+        content=content,
+        security=SecurityContext(allowed_roles=["EMPLOYEE"], clearance_level=3,
+                                 sensitivity_class="D")), score=1.0)
+
+
+def test_filter_redacts_masked_chunk_content():
+    from rag_engine.governance.filter import SecurityFilter
+    analyst = _sess(["MARKETING_ANALYST", "EMPLOYEE"], 2)
+    admitted, trail = SecurityFilter().apply([_pii_chunk_with_content(_RAW_PII)], analyst)
+    assert trail[0].decision == "mask"
+    assert len(admitted) == 1
+    # the ADMITTED chunk must no longer carry the raw PII
+    assert "jane.doe@example.com" not in admitted[0].chunk.content
+    assert "123-45-6789" not in admitted[0].chunk.content
+    assert admitted[0].chunk.content == "[REDACTED]"
+
+
+def test_filter_does_not_redact_allowed_chunk():
+    from rag_engine.governance.filter import SecurityFilter
+    # L4 sees customer PII raw (class D allow)
+    director = _sess(["FINANCE", "EMPLOYEE"], 4)
+    admitted, trail = SecurityFilter().apply([_pii_chunk_with_content(_RAW_PII)], director)
+    assert trail[0].decision == "allow"
+    assert admitted[0].chunk.content == _RAW_PII  # unchanged
+
+
+def test_end_to_end_masked_pii_never_reaches_answer_or_citations():
+    """C1 headline: a class-D chunk queried by an L2 analyst yields a redaction
+    token in BOTH answer and citation quote — never the raw value."""
+    from rag_engine import RAGPipeline
+    from rag_engine.schemas import Session
+
+    pipe = RAGPipeline()
+    # inject a class-D chunk directly (markdown loader doesn't tag class)
+    raw = _pii_chunk_with_content(_RAW_PII)
+
+    class _StubRetriever:
+        def retrieve(self, q):
+            return [raw]
+
+    pipe.retriever = _StubRetriever()
+    analyst = Session(user_id="ma", roles=["MARKETING_ANALYST", "EMPLOYEE"], clearance_level=2)
+    resp = pipe.query("show me the customer contact details", analyst)
+
+    # raw PII must appear NOWHERE
+    for secret in ("jane.doe@example.com", "555-867-5309", "123-45-6789"):
+        assert secret not in resp.answer, f"LEAK in answer: {secret}"
+        for c in resp.citations:
+            assert secret not in c.quote, f"LEAK in citation: {secret}"
+    # and the redaction token IS present in the citation quote
+    assert resp.citations, "expected the masked chunk to still be cited"
+    assert "[REDACTED]" in resp.citations[0].quote
