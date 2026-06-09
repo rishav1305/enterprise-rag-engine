@@ -15,7 +15,8 @@ Each phase is an increasing-impact increment that ships demoable value; the dest
 | **P0.1b** Catalog + Governance-v2 | catalog registry, SecurityContext→assets/columns, leak oracle bound to matrix | `Connector` ABC, column masking | M |
 | **P0.2a** SurrealDB spine | unified store: graph/SurrealQL/full-text/catalog | self-host (titan-pc) AND Cloud both built+tested | M |
 | **P0.2b** TurboVec vector index | compressed ANN + vector allowlist pre-filter + offline build — **BUILT + unit-proven, NOT yet wired into live retrieval** | + Qdrant fallback adapter real & tested; recall re-validated on real embeddings (~0.45 tight / ~0.90+ text; reranker load-bearing) | L |
-| **P0.2c** Retrieval integration | **wire TurboVec into `HybridRetriever`** (vector mode), make the **reranker mandatory** on the coarse set, route vector queries through the **allowlist pre-filter** + downstream C1; **E2E C1-over-vector test** (class-D chunk via TurboVec → `[REDACTED]` in answer + citations). Closes the build-vs-wired gap from P0.2b. | both stores (in-mem + SurrealDB-backed) wired; Qdrant fallback path exercised | M |
+| **P0.2c** Retrieval integration | **DONE** — `TurboVecRetriever` wired into the pipeline (vector mode), **reranker mandatory** on the coarse set, vector queries through the **allowlist pre-filter** + downstream C1; **E2E C1-over-vector** (class-D via live TurboVec → `[REDACTED]`; **hardened** to assert the L5 chunk never enters the candidate set, so it fails if the pre-filter is bypassed). Closed the build-vs-wired gap. | live path uses an in-memory `ChunkSource` (store adapter → P0.2d) | M |
+| **P0.2d** Store-backed retrieval + ELASTIC | **(TRACK, next/integration)** SurrealStore→`ChunkSource` adapter (`get_chunk`/`all_chunk_security` over the SurrealDB `chunk` table) so the live path hydrates from the store, not in-memory; **store-backed E2E** (class-D via SurrealDB-backed TurboVec path → `[REDACTED]`). ELASTIC: `governance.allowlist.authorized_chunk_ids` is **O(N)/query** (evaluates every chunk's ACL) — replace with a catalog/asset-scoped or indexed allowlist derivation (ReBAC list-objects, spec §9 Oso/SpiceDB) so it doesn't scan all chunks per query. | both stores live; Qdrant fallback exercised | M |
 | **P0.3a** BigQuery PB tail + SQL safety | text-to-SQL target, cost guard, `sqlglot` AST gate | tiered parsers (Docling+LlamaParse+Reducto) | M |
 | **P0.3b** Text-to-SQL agent | NL→SQL over derivative vs PB-tail routing | semantic-router adaptive routing | M |
 | **P0.4** Opaque-schema glossary | profiler + miner + LLM-drafter + drift CI | full glossary governance | L |
@@ -30,11 +31,12 @@ Each phase is an increasing-impact increment that ships demoable value; the dest
 ## Dependency graph
 
 ```
-S1 ─► P0.1a ─► P0.1b ─┬─► P0.2a ─► P0.2b ─► P0.2c ─┐
-                      └─► P0.3a ─► P0.3b ─────────┤
-                                                  ├─► P0.4 ─► P0.5 ─► P0.6 ─► P0.7 ─► P0.8 ─► P0.9 ─► P0.10 ─► P0.11
+S1 ─► P0.1a ─► P0.1b ─┬─► P0.2a ─► P0.2b ─► P0.2c ─► P0.2d ─┐
+                      └─► P0.3a ─► P0.3b ─────────────────┤
+                                                          ├─► P0.4 ─► P0.5 ─► P0.6 ─► P0.7 ─► P0.8 ─► P0.9 ─► P0.10 ─► P0.11
                       (P0.2a ∥ P0.3a parallel; both need only P0.1b)
-                      (P0.2c wires P0.2b's index+pre-filter into live retrieval; before/with P0.3b routing)
+                      (P0.2c wired P0.2b's index+pre-filter into live retrieval — DONE)
+                      (P0.2d: store-backed ChunkSource adapter + O(N) allowlist fix; before/with P0.3b)
 ```
 
 ## Spikes

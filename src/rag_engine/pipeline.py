@@ -21,6 +21,7 @@ from .config import EngineConfig
 
 if TYPE_CHECKING:
     from .catalog.registry import CatalogRegistry
+    from .retrieval.turbovec_retriever import TurboVecRetriever
 from .enrichment.base import Contextualizer
 from .enrichment.local import LocalHeuristicContextualizer
 from .generation.base import Generator
@@ -58,6 +59,7 @@ class RAGPipeline:
         contextualizer: Contextualizer | None = None,
         generator: Generator | None = None,
         catalog: "CatalogRegistry | None" = None,
+        vector_retriever: "TurboVecRetriever | None" = None,
     ) -> None:
         self.config = config or EngineConfig()
         self.router = HeuristicRouter()
@@ -69,6 +71,10 @@ class RAGPipeline:
         # Catalog of asset/column policy (P0.1b). Optional: when present, the
         # pipeline can resolve a chunk's governing CatalogAsset by parent_doc_id.
         self.catalog: "CatalogRegistry | None" = catalog
+        # P0.2c: the LIVE session-aware vector path. When present, vector-mode
+        # queries route through it (allowlist pre-filter at the index + mandatory
+        # rerank). The L5 SecurityFilter still runs after (defense in depth).
+        self.vector_retriever: "TurboVecRetriever | None" = vector_retriever
         self._chunks: list[EnrichedChunk] = []
 
     def asset_for(self, parent_doc_id: str):
@@ -97,7 +103,16 @@ class RAGPipeline:
     # ---- query --------------------------------------------------------
     def query(self, question: str, session: Session) -> RAGResponse:
         architecture = self.router.route(question)
-        candidates = self.retriever.retrieve(question)
+        if self.vector_retriever is not None:
+            # LIVE vector path (P0.2c): allowlist pre-filter at the index +
+            # mandatory rerank. Already permission-scoped to the session; the L5
+            # filter below still runs (masks class-D / records the trail) —
+            # defense in depth (pre-filter drops denied, post-filter masks).
+            candidates = self.vector_retriever.retrieve_for_session(question, session)
+        else:
+            # Permission-BLIND path (the INTERN-vs-CFO leak demo's story): find the
+            # best content regardless of caller; the L5 filter is the only gate.
+            candidates = self.retriever.retrieve(question)
         admitted, trail = self.security.apply(candidates, session)
         self.audit.record(session, question, trail)
 
