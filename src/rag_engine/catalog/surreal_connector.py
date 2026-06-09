@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from ..schemas import SecurityContext
-from .asset import CatalogAsset, ColumnPolicy
+from .asset import CatalogAsset
 from .connector import _CLASS_ROLES, Connector, column_policy_for
 
 
