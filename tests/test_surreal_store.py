@@ -90,3 +90,36 @@ def test_load_estate_into_surreal(surreal_local):
     assert load_estate(st, scale=0.01) == 25
     assert st.count_assets() == 25
     st.close()
+
+
+# ---- Task 7: SurrealDB-sourced catalog plugs into the pipeline unchanged --
+def test_pipeline_with_surreal_catalog_is_transparent(surreal_local):
+    """The live engine works identically whether the catalog is seed- or
+    SurrealDB-backed — same RAGPipeline surface, no code change."""
+    from rag_engine import RAGPipeline
+    from rag_engine.catalog.connector import SeedConnector
+    from rag_engine.catalog.registry import CatalogRegistry
+    from rag_engine.catalog.surreal_connector import SurrealConnector
+    from rag_engine.store.surreal import SurrealStore
+    from seeds.targets.surreal_target import load_estate
+
+    st = SurrealStore(dsn=surreal_local["dsn"], ns="meridian", db="pipe",
+                      user="root", password="root")
+    st.connect()
+    st.apply_schema()
+    load_estate(st, scale=0.01)
+
+    seed_reg = CatalogRegistry()
+    seed_reg.load(SeedConnector(scale=0.01))
+    surr_reg = CatalogRegistry()
+    surr_reg.load(SurrealConnector(st))
+
+    p_seed = RAGPipeline(catalog=seed_reg)
+    p_surr = RAGPipeline(catalog=surr_reg)
+
+    # both pipelines resolve the same asset/column policy via the catalog
+    assert p_surr.catalog.get("hr_records").sensitivity_class == "F"
+    assert (p_surr.asset_for("payments_ledger").masked_columns()
+            == p_seed.asset_for("payments_ledger").masked_columns())
+    assert p_surr.asset_for("nonexistent") is None  # graceful miss
+    st.close()
