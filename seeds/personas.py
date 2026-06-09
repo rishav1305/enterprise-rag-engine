@@ -23,7 +23,9 @@ class Persona:
 # world bible §4 — 14 personas (incl. Strategist, fixes golden scenario #6)
 PERSONAS: tuple[Persona, ...] = (
     Persona("intern", "Intern", "KNOWLEDGE_SUPPORT", 1, ("INTERN", "EMPLOYEE")),
-    Persona("support_agent", "Support Agent", "KNOWLEDGE_SUPPORT", 1, ("CUSTOMER_SUPPORT", "EMPLOYEE")),
+    # L2 (not L1): §4 intent is "customer-facing; sees masked PII" -> needs C (own
+    # queue, team-ops L2) + D masked. L1 wrongly denied both. (I2 reconciliation.)
+    Persona("support_agent", "Support Agent", "KNOWLEDGE_SUPPORT", 2, ("CUSTOMER_SUPPORT", "EMPLOYEE")),
     Persona("data_analyst", "Data Analyst", "ENGINEERING", 2, ("DATA_ANALYST", "EMPLOYEE")),
     Persona("ops_analyst", "Ops Analyst", "MOBILITY_OPS", 2, ("OPS_ANALYST", "EMPLOYEE")),
     Persona("commerce_analyst", "Commerce Analyst", "COMMERCE", 2, ("COMMERCE_ANALYST", "EMPLOYEE")),

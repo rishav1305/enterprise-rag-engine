@@ -74,3 +74,27 @@ def test_sales_manager_customer_pii_is_masked_not_raw():
     cfo = PERSONAS_BY_KEY["cfo"]
     cfo_sess = Session(user_id="cfo", roles=list(cfo.roles), clearance_level=cfo.clearance_level)
     assert evaluate(_chunk_for("D"), cfo_sess).decision == "allow"
+
+
+def _decision(persona_key, cls):
+    p = PERSONAS_BY_KEY[persona_key]
+    sess = Session(user_id=persona_key, roles=list(p.roles), clearance_level=p.clearance_level)
+    return evaluate(_chunk_for(cls), sess).decision
+
+
+def test_i2_support_agent_own_queue_and_masked_pii():
+    # I2: §4 intent — customer-facing, sees masked PII. L2 grants C (own queue)
+    # + D masked. Doc (§4 L2, §5 C=✓/D=masked) aligned to this.
+    assert _decision("support_agent", "C") == "allow"
+    assert _decision("support_agent", "D") == "mask"
+
+
+def test_i2_engineer_customer_pii_masked():
+    # I2: Engineer/D = mask (code right; world-bible §5 aligned from ✗ to masked).
+    assert _decision("engineer", "D") == "mask"
+
+
+def test_i2_intern_protagonist_unaffected():
+    # the adversarial-leak protagonist stays L1 -> denied C and D.
+    assert _decision("intern", "C") == "deny"
+    assert _decision("intern", "D") == "deny"

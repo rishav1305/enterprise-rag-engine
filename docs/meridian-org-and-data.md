@@ -59,7 +59,7 @@ A `SecurityContext` (frozen Pydantic model in the engine) carries `allowed_roles
 | Persona | Vertical | Level | Notes |
 |---|---|---|---|
 | **Intern** | Knowledge/Support | L1 | the adversarial-leak protagonist |
-| **Support Agent** | Knowledge/Support | L1 | customer-facing; sees masked PII |
+| **Support Agent** | Knowledge/Support | L2 | customer-facing; own-queue team-ops (C) + masked customer PII (D) |
 | **Data Analyst** | Engineering/Data | L2 | queries the warehouse; the text-to-SQL user |
 | **Ops Analyst** | Mobility Ops | L2 | trip aggregates |
 | **Commerce Analyst** | Marketplace | L2 | sales analytics |
@@ -82,10 +82,10 @@ Asset sensitivity classes: **A** Public (L0) · **B** Employee-general (L1) · *
 | Persona | A | B | C | D | E | F | G | H |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
 | Intern | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| Support Agent | ✓ | ✓ | own queue | **masked** | ✗ | ✗ | ✗ | ✗ |
+| Support Agent | ✓ | ✓ | ✓ (own queue) | **masked** | ✗ | ✗ | ✗ | ✗ |
 | Data/Ops/Commerce Analyst | ✓ | ✓ | ✓ | **masked** | ✗ | ✗ | ✗ | ✗ |
 | Marketing Analyst | ✓ | ✓ | ✓ | **masked** | ✗ | ✗ | ✗ | ✗ |
-| Engineer | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | partial |
+| Engineer | ✓ | ✓ | ✓ | **masked** | ✗ | ✗ | ✗ | partial |
 | Sales Manager | ✓ | ✓ | ✓ | **masked** | ✗ | ✗ | ✗ | ✗ |
 | Finance Manager | ✓ | ✓ | ✓ | ✓ | ✓ | **✗** | ✗ | ✗ |
 | Legal Counsel | ✓ | ✓ | ✓ | ✓ | **✗** | **✗** | ✓ | ✗ |

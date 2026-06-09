@@ -21,9 +21,12 @@ class Decision(str, Enum):
     ALLOW = "allow"
     MASK = "mask"
     DENY = "deny"
-    # TODO(P0.1b): no PARTIAL decision yet — §5 marks Engineer/H "partial" (sees some
-    # security tickets, not all). Currently collapsed to DENY for Engineer. Model
-    # partial/row-scoped access when the catalog carries per-ticket ACLs.
+    # NB: this oracle (the seeds-side ground truth) intentionally has NO PARTIAL —
+    # it scores asset-level class access, where Engineer/H has no scoped grant, so
+    # it collapses to DENY here. The ENGINE implements PARTIAL (rag_engine.governance
+    # .access) for row-scoped grants when a chunk carries partial_for metadata; the
+    # oracle-binding test (tests/test_leak_oracle.py) drives chunks WITHOUT that
+    # metadata, so engine and oracle agree exactly (no partial cells in the matrix).
 
 
 @dataclass(frozen=True, slots=True)
