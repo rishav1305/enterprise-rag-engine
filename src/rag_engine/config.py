@@ -20,6 +20,12 @@ class EngineConfig:
     rerank_top_k: int = 8           # candidates passed to the reranker
     final_top_k: int = 5            # chunks handed to governance
 
+    # vector path (P0.2c) — TurboVec coarse retrieval feeds a MANDATORY reranker.
+    # The reranker is load-bearing (P0.2b: ~0.45 coarse recall on tight clusters,
+    # rerank recovers to ~0.80+), so over-fetch a wide coarse set and ALWAYS rerank.
+    vector_coarse_k: int = 200      # over-fetch from TurboVec before reranking
+    vector_path_rerank_mandatory: bool = True  # documented invariant; non-disableable
+
     # generation
     max_quote_chars: int = 240
 
