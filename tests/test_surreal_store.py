@@ -28,3 +28,22 @@ def test_config_surreal_from_env(monkeypatch):
     cfg = EngineConfig()
     assert cfg.store_backend == "surrealdb"
     assert cfg.surreal_dsn == "wss://cloud.example/rpc"
+
+
+# ---- Task 2: schema DDL ------------------------------------------------
+def test_schema_ddl_is_idempotent_shaped():
+    from rag_engine.store.schema import ddl_statements
+    stmts = ddl_statements()
+    assert any("DEFINE TABLE" in s for s in stmts)
+    assert any("HNSW" in s for s in stmts)       # vector index
+    assert any("FULLTEXT" in s for s in stmts)   # full-text index
+    # every DEFINE must be idempotent (OVERWRITE or IF NOT EXISTS) for safe re-apply
+    for s in stmts:
+        if s.strip().startswith("DEFINE"):
+            assert "IF NOT EXISTS" in s or "OVERWRITE" in s, s
+
+
+def test_schema_ddl_vector_dim_configurable():
+    from rag_engine.store.schema import ddl_statements
+    stmts = ddl_statements(vector_dim=384)
+    assert any("DIMENSION 384" in s for s in stmts)
