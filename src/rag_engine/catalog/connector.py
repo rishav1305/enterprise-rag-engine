@@ -9,21 +9,31 @@ later phases behind this same ABC (CONFIGURABLE / multi-setup).
 
 from __future__ import annotations
 
+import sys
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
+from pathlib import Path
 
 from ..schemas import SecurityContext
 from .asset import CatalogAsset, ColumnPolicy
 
-# class -> default allowed/need-to-know roles for the asset-level SecurityContext.
-# Mirrors seeds/access_matrix.py CLASSES need_to_know (single source of governance truth).
+# Make the repo-root `seeds` package importable (the catalog reads the governance
+# source of truth directly — no hand-copied tables, no drift).
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from seeds.access_matrix import CLASSES as _CLASSES  # noqa: E402
+
+# class -> need-to-know roles, DERIVED from seeds.access_matrix (single source).
+# I1 fix: no hand-copied EMPLOYEE injection. A class with no need_to_know_roles is
+# level-only — its asset SecurityContext carries no role restriction, exactly as
+# the access model intends (over-restricting non-EMPLOYEE roles was the drift bug).
 _CLASS_ROLES: dict[str, list[str]] = {
-    "A": [], "B": ["EMPLOYEE"], "C": ["EMPLOYEE"], "D": ["EMPLOYEE"],
-    "E": ["FINANCE", "C_SUITE"], "F": ["C_SUITE"],
-    "G": ["LEGAL", "C_SUITE", "STRATEGY"], "H": ["CISO", "SECURITY", "BOARD"],
-    "I": ["FINANCE", "C_SUITE"], "J": ["EMPLOYEE"], "K": ["EMPLOYEE"],
-    "L": ["EMPLOYEE"], "M": ["FINANCE", "C_SUITE"], "N": ["FINANCE", "C_SUITE"],
+    code: list(sc.need_to_know_roles) for code, sc in _CLASSES.items()
 }
+# per-class min clearance level, also derived (no magic numbers).
+_CLASS_LEVEL: dict[str, int] = {code: sc.min_level for code, sc in _CLASSES.items()}
 
 
 class Connector(ABC):

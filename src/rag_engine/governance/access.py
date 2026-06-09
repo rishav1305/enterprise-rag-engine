@@ -77,10 +77,14 @@ def evaluate(chunk: EnrichedChunk, session: Session) -> GovernanceDecision:
             **base,
         )
 
-    # --- allowed_roles gate (legacy path; preserved for un-classed chunks)
-    # NB: matches original semantics — a non-public chunk with empty allowed_roles
-    # is disjoint with the session and therefore denied (fail-closed).
-    if roles.isdisjoint(sec.allowed_roles):
+    # --- allowed_roles gate (LEGACY path — un-classed chunks only) -------
+    # Classed chunks are governed by the level + need-to-know gates above; a
+    # classed chunk that reaches here (level OK, need-to-know satisfied or absent)
+    # is allowed — a level-only class (empty need-to-know, e.g. B/C/J/L) must NOT
+    # be denied for lacking a role (that was the _CLASS_ROLES drift bug). For
+    # un-classed legacy chunks we keep the original fail-closed role gate: a
+    # non-public chunk with empty allowed_roles is disjoint and therefore denied.
+    if not cls and roles.isdisjoint(sec.allowed_roles):
         return GovernanceDecision(
             decision="deny",
             reason=f"role_mismatch (need one of {sec.allowed_roles})",

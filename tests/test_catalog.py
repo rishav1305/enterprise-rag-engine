@@ -71,3 +71,19 @@ def test_pipeline_catalog_is_optional():
     from rag_engine import RAGPipeline
     p = RAGPipeline()
     assert p.catalog is None
+
+
+def test_class_roles_no_drift_from_access_matrix():
+    # I1: connector _CLASS_ROLES must be DERIVED from access_matrix, never
+    # hand-copied. No spurious EMPLOYEE injection on level-only classes.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from seeds.access_matrix import CLASSES
+    from rag_engine.catalog.connector import _CLASS_LEVEL, _CLASS_ROLES
+    for code, sc in CLASSES.items():
+        assert _CLASS_ROLES[code] == list(sc.need_to_know_roles), (
+            f"class {code} role drift: {_CLASS_ROLES[code]} != {list(sc.need_to_know_roles)}"
+        )
+        assert _CLASS_LEVEL[code] == sc.min_level
+    # explicit: level-only classes carry NO injected roles
+    for code in ("B", "C", "D", "J", "K", "L"):
+        assert _CLASS_ROLES[code] == []
