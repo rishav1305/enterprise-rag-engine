@@ -41,7 +41,8 @@ def test_chunksource_get_chunk_roundtrip(surreal_local):
     c = source.get_chunk(cid)
     assert c is not None and c.content                  # full text hydrated
     assert c.security.sensitivity_class in set("ABCDEFGHIJKLMN")
-    assert source.get_chunk("chunk:does-not-exist") is None
+    # well-formed-but-absent bare key (not a colon-form id) -> None
+    assert source.get_chunk("absent_asset-999999") is None
     st.close()
 
 
@@ -198,4 +199,70 @@ def test_bare_id_strips_special_char_wrapping(surreal_local):
     # and that clean key is exactly what get_chunk accepts (round-trip).
     c = source.get_chunk(src_bare_id(rid))
     assert c is not None and c.chunk_id == real_cid
+    st.close()
+
+
+# ---- governance fail-closed: bogus/unknown class must NEVER be admitted -------
+def _fresh_store(surreal_local, db, dim=128):
+    st = SurrealStore(dsn=surreal_local["dsn"], ns="meridian", db=db,
+                      user="root", password="root")
+    st.connect()
+    st.apply_schema(vector_dim=dim)
+    return st
+
+
+def test_bogus_cls_get_chunk_returns_none_not_allow(surreal_local):
+    """A stored chunk with an unknown class (SCHEMALESS table, no ASSERT) must be
+    FAIL-CLOSED on read — get_chunk returns None, never a level-only ALLOW."""
+    st = _fresh_store(surreal_local, "cs_bogus_get")
+    st.upsert_chunk({"chunk_id": "bad-000001", "asset_id": "bad", "cls": "ZZ",
+                     "level": 1, "text": "secret", "vec": [0.0] * 128})
+    source = SurrealChunkSource(st)
+    assert source.get_chunk("bad-000001") is None   # unknown class -> not retrievable
+    st.close()
+
+
+def test_bogus_cls_excluded_from_allowlist(surreal_local):
+    """A bogus-class row is SKIPPED in all_chunk_security (not added to the
+    allowlist) — one malformed row can't make the allowlist permissive or abort
+    the build; well-formed rows still come through."""
+    st = _fresh_store(surreal_local, "cs_bogus_allow")
+    st.upsert_chunk({"chunk_id": "bad-000001", "asset_id": "bad", "cls": "ZZ",
+                     "level": 1, "text": "x", "vec": [0.0] * 128})
+    st.upsert_chunk({"chunk_id": "good-000001", "asset_id": "good", "cls": "B",
+                     "level": 1, "text": "y", "vec": [0.0] * 128})
+    source = SurrealChunkSource(st)
+    ids = {ec.chunk_id for ec in source.all_chunk_security()}
+    assert "bad-000001" not in ids      # malformed -> excluded (fail-closed)
+    assert "good-000001" in ids         # build not aborted; good row survives
+    st.close()
+
+
+def test_bogus_cls_denied_end_to_end_via_retriever(surreal_local):
+    """End-to-end: a bogus-class chunk in the index is never retrieved (its id is
+    absent from the allowlist, so the pre-filter excludes it) AND get_chunk would
+    drop it too — defense in depth, never ALLOW."""
+    import numpy as np
+    from rag_engine.retrieval.embedders import HashingEmbedder
+    from rag_engine.retrieval.rerank import LexicalOverlapReranker
+    from rag_engine.retrieval.turbovec_index import TurboVecIndex
+    from rag_engine.retrieval.turbovec_retriever import TurboVecRetriever
+    from rag_engine.schemas import Session
+
+    st = _fresh_store(surreal_local, "cs_bogus_e2e")
+    emb = HashingEmbedder(dim=128)
+    rows = [("bad-000001", "exec comp ceo salary secret", "ZZ", 1),
+            ("good-000001", "public stipend record", "B", 1)]
+    v = emb.embed([r[1] for r in rows]).astype("float32")
+    v /= np.linalg.norm(v, axis=1, keepdims=True) + 1e-9
+    for (cid, txt, cls, lvl), vec in zip(rows, v):
+        st.upsert_chunk({"chunk_id": cid, "asset_id": cid, "cls": cls,
+                         "level": lvl, "text": txt, "vec": vec.tolist()})
+    idx = TurboVecIndex(dim=128)
+    idx.add([r[0] for r in rows], v)
+    retriever = TurboVecRetriever(idx, emb, SurrealChunkSource(st),
+                                  LexicalOverlapReranker())
+    emp = Session(user_id="e", roles=["EMPLOYEE"], clearance_level=1)
+    cand_ids = {h.chunk.chunk_id for h in retriever.retrieve_for_session("exec comp", emp)}
+    assert "bad-000001" not in cand_ids   # bogus-class chunk NEVER retrieved
     st.close()

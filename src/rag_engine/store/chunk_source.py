@@ -33,7 +33,20 @@ def _bare_id(rid) -> str:
 
 
 def _security(cls: str, level: int) -> SecurityContext:
-    roles = _CLASS_ROLES.get(cls, [])
+    """Rebuild a SecurityContext from a stored chunk's cls/level — FAIL-CLOSED.
+
+    The `chunk` table is SCHEMALESS (no ASSERT on `cls`), so a malformed/unknown
+    class could otherwise slip through. We index `_CLASS_ROLES[cls]` (NOT
+    `.get(cls, [])`) to match ingestion (`catalog.connector`): an unknown class
+    raises ``KeyError`` rather than producing empty roles, which `access.evaluate`
+    would treat as level-only and ALLOW (a fail-OPEN governance hole). Callers
+    decide how to surface the failure (drop the row / return None) — but a row
+    with an unknown class must NEVER be admitted.
+
+    NB: ``owner_department`` is intentionally NOT rebuilt here — governance reads
+    it nowhere (access-inert); it is dropped on purpose, not an oversight.
+    """
+    roles = _CLASS_ROLES[cls]  # fail-closed: KeyError on unknown class
     return SecurityContext(
         allowed_roles=roles,
         clearance_level=level,
@@ -50,27 +63,40 @@ class SurrealChunkSource:
         row = self.store.get_chunk_row(chunk_id)
         if row is None:
             return None
+        try:
+            security = _security(row["cls"], row["level"])
+        except KeyError:
+            # malformed row (unknown/missing class) -> NOT retrievable (fail-closed).
+            return None
         cid = _bare_id(row.get("id", chunk_id))
         return EnrichedChunk(
             chunk_id=cid,
             parent_doc_id=row.get("asset_id", ""),
             parent_title=row.get("asset_id", ""),
             content=row.get("text", ""),
-            security=_security(row["cls"], row["level"]),
+            security=security,
         )
 
     def all_chunk_security(self) -> list[EnrichedChunk]:
-        """ELASTIC: ids + ACLs only (content=''), no text/vec pulled."""
+        """ELASTIC: ids + ACLs only (content=''), no text/vec pulled.
+
+        Fail-closed: a row with an unknown/missing class is SKIPPED (not added to
+        the allowlist), so it is never retrievable. One malformed row cannot make
+        the allowlist permissive, nor abort the whole build.
+        """
         out: list[EnrichedChunk] = []
         for row in self.store.chunk_security_rows():
-            cid = _bare_id(row["id"])
+            try:
+                security = _security(row["cls"], row["level"])
+            except KeyError:
+                continue  # malformed row -> excluded from the allowlist (fail-closed)
             out.append(
                 EnrichedChunk(
-                    chunk_id=cid,
+                    chunk_id=_bare_id(row["id"]),
                     parent_doc_id=row.get("asset_id", ""),
                     parent_title="",
                     content="",  # NO content pulled
-                    security=_security(row["cls"], row["level"]),
+                    security=security,
                 )
             )
         return out

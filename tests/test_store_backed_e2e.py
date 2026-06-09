@@ -174,3 +174,60 @@ def test_cfo_does_get_exec_comp_via_store_backed_path(store_pipeline_with_pii):
     resp = pipe.query("exec comp ceo salary contact", cfo)
     assert "store_e2e_finance" in {c.parent_doc_id for c in resp.citations}
     assert "480000" in resp.answer
+
+
+def test_mixed_class_response_B_raw_and_D_masked_store_backed(store_pipeline_with_pii):
+    """5. Multi-class in ONE store-backed response: class-B stays RAW and class-D
+    is MASKED ([REDACTED]) in the same citation set — proving per-chunk governance
+    (not all-or-nothing) over the real store path. (Class-F is dropped, covered
+    elsewhere.)"""
+    pipe, analyst, _ = store_pipeline_with_pii
+    resp = pipe.query("customer contact record stipend", analyst)
+    cited = {c.parent_doc_id for c in resp.citations}
+    quotes = " ".join(c.quote for c in resp.citations)
+    # B: public chunk admitted RAW (its handbook content survives)
+    assert "store_e2e_handbook" in cited
+    assert "500" in quotes or "stipend" in quotes.lower()
+    # D: customer-PII admitted but MASKED — redaction token, raw PII absent
+    assert "store_e2e_customers" in cited
+    assert "[REDACTED]" in quotes
+    for secret in _SECRETS:
+        assert secret not in quotes and secret not in resp.answer
+
+
+def test_store_drift_id_in_index_absent_from_store_is_dropped(surreal_local):
+    """6. RESILIENT store drift: an id in the TurboVec index but ABSENT from the
+    store (get_chunk -> None) is silently dropped end-to-end — non-crashing result,
+    the present chunk still returned. (turbovec_retriever's `if chunk is not None`.)"""
+    cfg = EngineConfig()
+    emb = HashingEmbedder(dim=cfg.embedding_dim)
+    st = SurrealStore(dsn=surreal_local["dsn"], ns="meridian", db="store_e2e_drift",
+                      user="root", password="root")
+    st.connect()
+    st.apply_schema(vector_dim=cfg.embedding_dim)
+
+    present_id, ghost_id = "store_drift-present", "store_drift-ghost"
+    texts = ["public stipend record contact", "ghost record contact"]
+    vecs = emb.embed(texts).astype("float32")
+    vecs /= np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-9
+    idx = TurboVecIndex(dim=cfg.embedding_dim)
+    idx.add([present_id, ghost_id], vecs)  # BOTH ids in the index...
+
+    # ...but ONLY the present chunk is upserted into the store (ghost is missing).
+    st.upsert_chunk({"chunk_id": present_id, "asset_id": "store_drift", "cls": "B",
+                     "level": 1, "text": texts[0], "vec": vecs[0].tolist()})
+    try:
+        source = SurrealChunkSource(st)
+        retriever = TurboVecRetriever(idx, emb, source, LexicalOverlapReranker(), cfg)
+        pipe = RAGPipeline(config=cfg, vector_retriever=retriever)
+        emp = Session(user_id="e", roles=["EMPLOYEE"], clearance_level=1)
+        # ghost is also absent from the allowlist (all_chunk_security skips it) AND
+        # would hydrate to None — defense in depth. The query must not crash.
+        resp = pipe.query("contact record", emp)
+        cited = {c.parent_doc_id for c in resp.citations}
+        assert ghost_id not in {sc.chunk.chunk_id
+                                for sc in retriever.retrieve_for_session("contact record", emp)}
+        # the present chunk still comes through (non-empty, non-crashing)
+        assert "store_drift" in cited
+    finally:
+        st.close()
