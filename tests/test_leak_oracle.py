@@ -59,9 +59,9 @@ def test_engine_matches_oracle_for_every_class(persona_key):
 
 def test_oracle_covers_full_matrix():
     oracle = build_oracle()["expectations"]
-    assert set(oracle) == set(PERSONAS_BY_KEY)  # 14 personas
+    assert set(oracle) == set(PERSONAS_BY_KEY)  # 15 personas
     for grid in oracle.values():
-        assert set(grid) == set(CLASSES)         # 14 classes
+        assert set(grid) == set(CLASSES)         # 14 classes (A-N)
 
 
 def test_sales_manager_customer_pii_is_masked_not_raw():
