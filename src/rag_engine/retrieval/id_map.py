@@ -32,6 +32,10 @@ class IdMap:
     def to_chunk_id(self, u: int) -> str | None:
         return self._rev.get(u)
 
+    def contains(self, chunk_id: str) -> bool:
+        """True if ``chunk_id`` has a uint64 assigned (i.e. is in the index)."""
+        return chunk_id in self._fwd
+
     def __len__(self) -> int:
         return len(self._fwd)
 

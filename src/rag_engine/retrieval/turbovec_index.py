@@ -62,7 +62,7 @@ class TurboVecIndex:
         kwargs = {}
         if allowlist_chunk_ids is not None:
             allow = [self._id_map.to_u64(c) for c in allowlist_chunk_ids
-                     if c in self._id_map._fwd]  # only ids actually in the index
+                     if self._id_map.contains(c)]  # only ids actually in the index
             if not allow:
                 return []  # nothing the session may see -> empty (fail-closed)
             kwargs["allowlist"] = np.array(allow, dtype=np.uint64)

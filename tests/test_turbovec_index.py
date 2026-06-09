@@ -55,3 +55,23 @@ def test_search_k_bounds():
     idx.add(ids, v)
     assert len(idx.search(v[0], k=3)) <= 3
     assert len(idx.search(v[0], k=100)) <= 50            # never more than the corpus
+
+
+def test_build_index_and_roundtrip_vectors_to_surreal(surreal_local, tmp_path):
+    from rag_engine.store.surreal import SurrealStore
+    from seeds.targets.turbovec_target import build_index
+    st = SurrealStore(dsn=surreal_local["dsn"], ns="meridian", db="vec",
+                      user="root", password="root")
+    st.connect()
+    st.apply_schema()
+    out = str(tmp_path / "index.tvim")
+    n = build_index(st, out_path=out, scale=0.01, dim=128)
+    assert n > 0
+    # the .tvim + id-map landed, and vectors-by-id are in SurrealDB
+    assert (tmp_path / "index.tvim").exists()
+    assert (tmp_path / "index.tvim.idmap.json").exists()
+    assert st.count_chunks() == n
+    # the index reloads and searches
+    loaded = TurboVecIndex.load(out)
+    assert len(loaded) == n
+    st.close()

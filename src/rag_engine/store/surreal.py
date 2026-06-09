@@ -67,6 +67,29 @@ class SurrealStore:
     def count_assets(self) -> int:
         return len(self.all_assets())
 
+    # ---- chunks (vectors-by-id live here; TurboVec serves the ANN) ------
+    @staticmethod
+    def _chunk_rid(chunk_id: str):
+        from surrealdb import RecordID
+
+        # chunk_id is a bare key (e.g. "wikipedia_kb-000123"); record-id param-bound.
+        return RecordID("chunk", chunk_id)
+
+    def upsert_chunk(self, chunk: dict[str, Any]) -> None:
+        """Idempotent upsert of a chunk (text + vector + asset_id + ACL fields).
+
+        The id is bound as a RecordID param (no injection — SECURE).
+        """
+        content = {k: v for k, v in chunk.items() if k != "chunk_id"}
+        self._db.query(
+            "UPSERT $rid CONTENT $data;",
+            {"rid": self._chunk_rid(chunk["chunk_id"]), "data": content},
+        )
+
+    def count_chunks(self) -> int:
+        rows = self._db.query("SELECT count() AS n FROM chunk GROUP ALL;")
+        return int(rows[0]["n"]) if rows else 0
+
     def close(self) -> None:
         if self._db is not None:
             self._db.close()
