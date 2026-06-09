@@ -15,12 +15,23 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import shutil
+from pathlib import Path
 
 import pytest
 
 
 def _turbovec_installed() -> bool:
     return importlib.util.find_spec("turbovec") is not None
+
+
+def _surreal_binary() -> str | None:
+    """Locate the surreal binary (PATH or the documented ~/.surrealdb/surreal)."""
+    found = shutil.which("surreal")
+    if found:
+        return found
+    fallback = Path.home() / ".surrealdb" / "surreal"
+    return str(fallback) if fallback.exists() else None
 
 
 def test_turbovec_is_importable_in_dev_env():
@@ -52,3 +63,32 @@ def test_headline_p0_2b_tests_are_collected_not_skipped(pytestconfig):
     idx.add(["chunk:a", "chunk:b", "chunk:c", "chunk:d"], v)
     hits = idx.search(v[0], k=4, allowlist_chunk_ids=["chunk:b", "chunk:c"])
     assert {h.chunk_id for h in hits} <= {"chunk:b", "chunk:c"}  # pre-filter runs
+
+
+# ---- surreal binary no-skip guard (mirrors the turbovec guard) ----------
+def test_surreal_binary_available_in_dev_env():
+    """The 210-cell SurrealDB-parity + store tests need the `surreal` binary;
+    without it they SKIP via the surreal_local fixture (false-green on the
+    governance regression net). In a dev env (RAG_DEV_ENV=1) the binary MUST be
+    present — fail loudly, don't skip."""
+    dev_env = os.getenv("RAG_DEV_ENV") == "1"
+    binary = _surreal_binary()
+    if not dev_env and binary is None:
+        pytest.skip("runtime-only env (set RAG_DEV_ENV=1 in CI to enforce)")
+    assert binary is not None, (
+        "surreal binary not found (PATH or ~/.surrealdb/surreal) — the SurrealDB "
+        "parity/store tests would silently skip. Install surreal for the local CI gate."
+    )
+    assert importlib.util.find_spec("surrealdb") is not None, "surrealdb SDK missing"
+
+
+def test_surreal_parity_tests_run_when_binary_present():
+    """If the surreal binary is present, the 210-cell parity test module imports
+    its subjects cleanly (guards against a masked import error skipping parity)."""
+    if _surreal_binary() is None:
+        if os.getenv("RAG_DEV_ENV") == "1":
+            pytest.fail("surreal binary missing in dev env — 210-cell parity would skip")
+        pytest.skip("runtime-only env")
+    from rag_engine.catalog.surreal_connector import SurrealConnector  # noqa: F401
+    from rag_engine.store.surreal import SurrealStore  # noqa: F401
+    from seeds.targets.surreal_target import load_estate  # noqa: F401
