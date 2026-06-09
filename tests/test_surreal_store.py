@@ -47,3 +47,25 @@ def test_schema_ddl_vector_dim_configurable():
     from rag_engine.store.schema import ddl_statements
     stmts = ddl_statements(vector_dim=384)
     assert any("DIMENSION 384" in s for s in stmts)
+
+
+# ---- Task 3: SurrealStore (live, uses surreal_local fixture) ------------
+def test_surreal_store_applies_ddl_and_roundtrips(surreal_local):
+    from rag_engine.store.surreal import SurrealStore
+    st = SurrealStore(dsn=surreal_local["dsn"], ns=surreal_local["ns"],
+                      db=surreal_local["db"], user=surreal_local["user"],
+                      password=surreal_local["pass"])
+    st.connect()
+    st.apply_schema()
+    st.apply_schema()  # idempotent re-apply must not error (OVERWRITE)
+    st.upsert_asset({"asset_id": "hr_records", "cls": "F", "level": 5,
+                     "roles": ["C_SUITE"], "vertical": "PEOPLE",
+                     "retrieval_mode": "vector"})
+    got = st.get_asset("hr_records")
+    assert got["cls"] == "F" and got["level"] == 5
+    # upsert is idempotent (same id -> update, not duplicate)
+    st.upsert_asset({"asset_id": "hr_records", "cls": "F", "level": 5,
+                     "roles": ["C_SUITE"], "vertical": "PEOPLE",
+                     "retrieval_mode": "vector"})
+    assert st.count_assets() == 1
+    st.close()
