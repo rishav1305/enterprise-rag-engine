@@ -6,7 +6,17 @@
 # Usage:  make ci    (or)    bash scripts/ci.sh
 set -euo pipefail
 
+# Interpreter: prefer $PYTHON, else python3, else python — so the gate runs on
+# python3-only systems (this box has no `python` shim).
+PYTHON="${PYTHON:-}"
+if [ -z "$PYTHON" ]; then
+    if command -v python3 >/dev/null 2>&1; then PYTHON=python3
+    elif command -v python >/dev/null 2>&1; then PYTHON=python
+    else echo "FAIL: no python3/python interpreter found." >&2; exit 1; fi
+fi
+
 echo "== local CI gate =="
+echo "python: $PYTHON ($("$PYTHON" --version 2>&1))"
 
 # 1) enforce the dev env (turns importorskip/skipif guards into hard failures)
 export RAG_DEV_ENV=1
@@ -25,7 +35,7 @@ fi
 echo "surreal: $(command -v surreal) ($(surreal version 2>/dev/null | head -1))"
 
 # 3) assert the pinned dev deps are importable (don't let a missing dep skip)
-python - <<'PY'
+"$PYTHON" - <<'PY'
 import importlib.util, sys
 missing = [m for m in ("turbovec", "surrealdb", "faker", "polars", "numpy", "pydantic")
            if importlib.util.find_spec(m) is None]
@@ -40,11 +50,11 @@ PY
 #    -W error on unexpected skips is enforced by the in-suite no-skip guards
 #    (tests/test_ci_dependency_guard.py fails-not-skips in RAG_DEV_ENV=1).
 echo "== pytest -m 'not cloud' =="
-PYTHONPATH=src python -m pytest -m "not cloud" -rs
+PYTHONPATH=src "$PYTHON" -m pytest -m "not cloud" -rs
 
 # 5) belt-and-suspenders: assert ZERO skips among the headline test modules
 echo "== no-skip assertion (headline governance/turbovec/SurrealDB tests) =="
-SKIPS=$(PYTHONPATH=src python -m pytest -m "not cloud" -rs -q \
+SKIPS=$(PYTHONPATH=src "$PYTHON" -m pytest -m "not cloud" -rs -q \
     tests/test_turbovec_index.py tests/test_allowlist_prefilter.py \
     tests/test_turbovec_recall.py tests/test_oracle_parity.py \
     tests/test_surreal_store.py tests/test_surreal_connector.py \
