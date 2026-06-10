@@ -8,6 +8,8 @@ BigQuery client. Proven by spike S4 (``docs/spikes/s4-bigquery-cost-guard.md``).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import sqlglot
 from sqlglot import exp
 
@@ -66,3 +68,48 @@ def assert_read_only(sql: str, dialect: str = "bigquery") -> exp.Expression:
 def transpile_bigquery(tree: exp.Expression) -> str:
     """Render the validated tree as BigQuery-dialect SQL."""
     return tree.sql(dialect="bigquery")
+
+
+@dataclass(frozen=True)
+class ProjectionSource:
+    """One SELECT output column resolved to its SOURCE base columns.
+
+    ``output_key`` is the row key the result will carry (alias or column name).
+    ``source_columns`` is the set of base columns the projection derives from
+    (so an aliased / expression-wrapped masked column is still attributable).
+    ``is_star`` marks ``SELECT *`` (the caller expands it to the asset's columns).
+    ``resolvable`` is False when the projection's source can't be tied to a known
+    base column (e.g. a literal or an opaque function) — callers FAIL CLOSED and
+    redact such columns rather than assume they are safe.
+    """
+
+    output_key: str
+    source_columns: frozenset[str]
+    is_star: bool = False
+    resolvable: bool = True
+
+
+def projection_sources(tree: exp.Expression) -> list[ProjectionSource]:
+    """Map each SELECT projection to its source base columns (for result masking).
+
+    Resolves aliases (``customer_email AS em``), expressions over a column
+    (``UPPER(customer_email)``), bare columns, and ``SELECT *``. This is what makes
+    masking robust against an LLM choosing the output key: we mask off the SOURCE
+    column from the validated AST, not the attacker-controlled alias.
+    """
+    select = tree.this if isinstance(tree, exp.With) else tree
+    if not isinstance(select, exp.Select):
+        return []
+    out: list[ProjectionSource] = []
+    for proj in select.expressions:
+        if isinstance(proj, exp.Star):
+            out.append(ProjectionSource("*", frozenset(), is_star=True))
+            continue
+        cols = frozenset(c.name for c in proj.find_all(exp.Column))
+        key = proj.alias_or_name
+        # A projection with no resolvable source column AND that isn't itself a
+        # plain column reference (e.g. a literal/opaque fn) -> mark unresolvable so
+        # the caller can fail closed.
+        resolvable = bool(cols) or isinstance(proj, exp.Column)
+        out.append(ProjectionSource(key, cols, resolvable=resolvable))
+    return out
