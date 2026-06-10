@@ -23,3 +23,5 @@ seeds/_out/
 *.tvim
 
 .venv-p0.2c/
+
+.venv-p0.2d/

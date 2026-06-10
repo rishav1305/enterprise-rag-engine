@@ -90,6 +90,20 @@ class SurrealStore:
         rows = self._db.query("SELECT count() AS n FROM chunk GROUP ALL;")
         return int(rows[0]["n"]) if rows else 0
 
+    def get_chunk_row(self, chunk_id: str) -> dict[str, Any] | None:
+        """Full chunk row (text + asset_id + cls + level + vec) by id, or None."""
+        rows = self._db.query("SELECT * FROM $rid;", {"rid": self._chunk_rid(chunk_id)})
+        return rows[0] if rows else None
+
+    def chunk_security_rows(self) -> list[dict[str, Any]]:
+        """PROJECTED rows for the allowlist pass — ids + ACLs ONLY (no text/vec).
+
+        ELASTIC: the allowlist scan must not drag full content/vector blobs per
+        query; this projects just what governance needs (id, asset_id, cls, level).
+        """
+        rows = self._db.query("SELECT id, asset_id, cls, level FROM chunk;")
+        return list(rows) if rows else []
+
     def close(self) -> None:
         if self._db is not None:
             self._db.close()
