@@ -9,6 +9,7 @@ turbovec==0.7.0
 # P0.2a: SurrealDB python SDK (the unified-store tests).
 surrealdb>=2.0
 sqlglot>=25
+semantic-router>=0.1
 # deterministic synthetic-data + dataframe deps (P0.1a seeds).
 faker>=40
 polars>=1.0

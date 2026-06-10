@@ -37,6 +37,21 @@ class EngineConfig:
     )
     bq_dialect: str = field(default_factory=lambda: os.getenv("BQ_DIALECT", "bigquery"))
 
+    # routing + text-to-SQL (P0.3b) — CONFIGURABLE, multi-setup.
+    # router_backend: "heuristic" (regex fast-path, default) | "semantic"
+    # (embedding-similarity, local deterministic encoder, no LLM in hot path).
+    router_backend: str = field(default_factory=lambda: os.getenv("RAG_ROUTER", "heuristic"))
+    # sql_generator: "fake" (deterministic, tests) | "groq" | "nvidia" (live,
+    # OpenAI-compatible, creds-gated).
+    sql_generator: str = field(default_factory=lambda: os.getenv("RAG_SQL_GENERATOR", "fake"))
+    sql_llm_base_url: str = field(
+        default_factory=lambda: os.getenv("RAG_SQL_LLM_BASE_URL",
+                                          "https://api.groq.com/openai/v1")
+    )
+    sql_llm_model: str = field(
+        default_factory=lambda: os.getenv("RAG_SQL_LLM_MODEL", "llama-3.3-70b-versatile")
+    )
+
     # generation
     max_quote_chars: int = 240
 
