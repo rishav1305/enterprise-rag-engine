@@ -60,8 +60,18 @@ def _security(cls: str, level: int) -> SecurityContext:
 
 
 class SurrealChunkSource:
-    def __init__(self, store) -> None:
+    def __init__(self, store, audit_sink=None) -> None:
         self.store = store
+        # P0.5: a durable AuditSink makes malformed-row drops queryable, not just
+        # logged. Optional (in-memory or SurrealAuditSink); None -> log only.
+        self.audit_sink = audit_sink
+
+    def _audit_drop(self, where: str, chunk_id, cls) -> None:
+        if self.audit_sink is not None:
+            self.audit_sink.record_event(
+                "malformed_chunk_dropped",
+                {"where": where, "chunk_id": str(chunk_id), "cls": cls},
+            )
 
     def get_chunk(self, chunk_id: str) -> EnrichedChunk | None:
         row = self.store.get_chunk_row(chunk_id)
@@ -77,6 +87,7 @@ class SurrealChunkSource:
                 "chunk %s dropped: unknown/missing sensitivity class %r (fail-closed)",
                 chunk_id, row.get("cls"),
             )
+            self._audit_drop("get_chunk", chunk_id, row.get("cls"))
             return None
         cid = _bare_id(row.get("id", chunk_id))
         return EnrichedChunk(
@@ -105,6 +116,7 @@ class SurrealChunkSource:
                     "chunk %s excluded from allowlist: unknown/missing class %r (fail-closed)",
                     row.get("id"), row.get("cls"),
                 )
+                self._audit_drop("all_chunk_security", row.get("id"), row.get("cls"))
                 continue
             out.append(
                 EnrichedChunk(
