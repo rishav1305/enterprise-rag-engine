@@ -126,7 +126,19 @@ class Session(BaseModel):
     @field_validator("roles")
     @classmethod
     def _upper(cls, roles: list[str]) -> list[str]:
-        return [r.strip().upper() for r in roles if r.strip()]
+        # Reject control chars in role names: the cache scope fingerprint joins
+        # roles with \x1f, so a role literally containing a control char could
+        # alias two distinct scopes. Roles are plain identifiers — refuse to start
+        # on a malformed one (fail-closed, defense in depth).
+        out: list[str] = []
+        for r in roles:
+            r = r.strip()
+            if not r:
+                continue
+            if any(ord(ch) < 0x20 for ch in r):
+                raise ValueError(f"role contains a control character: {r!r}")
+            out.append(r.upper())
+        return out
 
 
 class ScoredChunk(BaseModel):

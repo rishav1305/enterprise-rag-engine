@@ -79,6 +79,47 @@ class EngineConfig:
     surreal_user: str = field(default_factory=lambda: os.getenv("SURREAL_USER", "root"))
     surreal_pass: str = field(default_factory=lambda: os.getenv("SURREAL_PASS", "root"))
 
+    # semantic cache (P0.7) — CONFIGURABLE, no magic numbers. Permission-aware:
+    # the cache key incorporates the session auth scope AND governance is re-applied
+    # on hit (see cache/semantic_cache.py). All knobs env-overridable + validated.
+    cache_enabled: bool = field(
+        default_factory=lambda: os.getenv("RAG_CACHE_ENABLED", "1") != "0"
+    )
+    cache_similarity_threshold: float = field(
+        default_factory=lambda: float(os.getenv("RAG_CACHE_SIMILARITY", "0.93"))
+    )
+    cache_ttl_seconds: int = field(
+        default_factory=lambda: int(os.getenv("RAG_CACHE_TTL_SECONDS", "900"))
+    )
+    cache_max_entries: int = field(
+        default_factory=lambda: int(os.getenv("RAG_CACHE_MAX_ENTRIES", "1024"))
+    )
+    # "memory" (in-process default) | "surreal" (durable, binary/creds-gated).
+    cache_backend: str = field(
+        default_factory=lambda: os.getenv("RAG_CACHE_BACKEND", "memory")
+    )
+
+    def __post_init__(self) -> None:
+        # Schema validation (CONFIGURABLE pillar): invalid config REFUSES to start —
+        # never silently falls back to a default that could mask a misconfiguration.
+        if not (0.0 < self.cache_similarity_threshold <= 1.0):
+            raise ValueError(
+                f"cache_similarity_threshold must be in (0.0, 1.0] (cosine), got "
+                f"{self.cache_similarity_threshold}"
+            )
+        if self.cache_ttl_seconds <= 0:
+            raise ValueError(
+                f"cache_ttl_seconds must be > 0, got {self.cache_ttl_seconds}"
+            )
+        if self.cache_max_entries <= 0:
+            raise ValueError(
+                f"cache_max_entries must be > 0, got {self.cache_max_entries}"
+            )
+        if self.cache_backend not in ("memory", "surreal"):
+            raise ValueError(
+                f"cache_backend must be 'memory' or 'surreal', got {self.cache_backend!r}"
+            )
+
     @property
     def use_anthropic(self) -> bool:
         return bool(os.getenv("ANTHROPIC_API_KEY"))

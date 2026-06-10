@@ -22,6 +22,9 @@ def ddl_statements(vector_dim: int = VECTOR_DIM) -> list[str]:
         "DEFINE TABLE OVERWRITE contract SCHEMALESS;",
         "DEFINE TABLE OVERWRITE component SCHEMALESS;",
         "DEFINE TABLE OVERWRITE ticket SCHEMALESS;",
+        # Durable semantic-cache entries (P0.7). scope_fp namespaces by auth scope;
+        # query_vec + chunk_ids + answer + embedder_version persist a governed result.
+        "DEFINE TABLE OVERWRITE query_cache SCHEMALESS;",
         # Graph edge between chunks (P0.6 graph mode). A directed `links` edge so
         # traversal (`chunk:a->links->chunk:b`) resolves to chunk ids — the same
         # governance currency the allowlist pre-filter is keyed on.
