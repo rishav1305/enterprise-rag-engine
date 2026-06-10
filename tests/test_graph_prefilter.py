@@ -46,10 +46,8 @@ def test_denied_node_never_in_graph_candidate_set():
 
 
 def test_graph_empty_allowlist_fail_closed():
-    retriever = _setup()
-    # a session that can see NOTHING (no roles, clearance 0) -> empty allowlist
+    # a session that can see NOTHING (no roles, clearance 0) over a denied-only graph
     nobody = Session(user_id="x", roles=[], clearance_level=0)
-    # public n2 is class-B level-1 -> still visible; use a denied-only graph instead:
     cd, _, _ = chunk("only_denied", cls="F", level=5, ntk=["C_SUITE"])
     src = FakeAclSource([cd])
     store = FakeModeStore(rows={"only_denied": {"asset": "a1", "text": "m"}},
