@@ -64,3 +64,53 @@ def test_missing_column_in_row_is_ignored():
     # a masked column declared but absent from a given row -> no error
     out = mask_rows([{"fare": 1.0}], (_PII, _OPEN), mask=True)
     assert out[0] == {"fare": 1.0}
+
+
+# ---- CRITICAL-fix: AST-source-driven masking (alias/case/expr/* bypasses) -----
+from rag_engine.sql.ast_gate import assert_read_only, projection_sources  # noqa: E402
+
+_VICTIM = "victim@pii.com"
+
+
+def _projs(sql):
+    return projection_sources(assert_read_only(sql))
+
+
+def test_alias_bypass_is_masked():
+    p = _projs("SELECT customer_email AS em FROM t WHERE d>='2024-01-01'")
+    out = mask_rows([{"em": _VICTIM}], (_PII,), mask=True, projections=p)
+    assert out[0]["em"] == "[REDACTED]" and _VICTIM not in str(out)
+
+
+def test_case_variant_key_is_masked():
+    p = _projs("SELECT customer_email FROM t WHERE d>='2024-01-01'")
+    out = mask_rows([{"CUSTOMER_EMAIL": _VICTIM}], (_PII,), mask=True, projections=p)
+    assert out[0]["CUSTOMER_EMAIL"] == "[REDACTED]" and _VICTIM not in str(out)
+
+
+def test_expression_over_masked_column_is_masked():
+    for sql, key in [
+        ("SELECT UPPER(customer_email) AS u FROM t WHERE d>='2024-01-01'", "u"),
+        ("SELECT customer_email || 'x' AS c FROM t WHERE d>='2024-01-01'", "c"),
+        ("SELECT SUBSTR(customer_email,1,3) AS s FROM t WHERE d>='2024-01-01'", "s"),
+    ]:
+        p = _projs(sql)
+        out = mask_rows([{key: _VICTIM}], (_PII,), mask=True, projections=p)
+        assert out[0][key] == "[REDACTED]", f"{sql} leaked"
+        assert _VICTIM not in str(out)
+
+
+def test_select_star_masks_the_masked_column():
+    p = _projs("SELECT * FROM t WHERE d>='2024-01-01'")
+    out = mask_rows([{"customer_email": _VICTIM, "fare": 1.0}], (_PII,),
+                    mask=True, projections=p)
+    assert out[0]["customer_email"] == "[REDACTED]"
+    assert out[0]["fare"] == 1.0 and _VICTIM not in str(out)
+
+
+def test_unresolvable_projection_fails_closed():
+    # a projection whose source can't be tied to a base column -> REDACT (fail-closed)
+    p = _projs("SELECT 'literal-or-opaque' AS mystery FROM t WHERE d>='2024-01-01'")
+    out = mask_rows([{"mystery": "could-be-sensitive"}], (_PII,),
+                    mask=True, projections=p)
+    assert out[0]["mystery"] == "[REDACTED]"   # never assume safe

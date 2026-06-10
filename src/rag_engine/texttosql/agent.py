@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from ..catalog.asset import ColumnPolicy
+from ..sql.ast_gate import assert_read_only, projection_sources
 from .result_masking import mask_rows
 
 
@@ -67,13 +68,19 @@ class TextToSqlAgent:
         self.answer_generator = answer_generator or _ExtractiveRowAnswerer()
 
     def answer(self, question: str, mask: bool = True) -> SqlAnswer:
-        # 1. draft + 2. run through the guard (raises on unsafe SQL -> never runs)
+        # 1. draft SQL
         sql = self.sql_generator.draft_sql(question)
+        # 2. validate via the AST gate FIRST (raises on unsafe SQL) and extract the
+        #    projection->source map — masking is driven by SOURCE columns, not the
+        #    LLM-chosen output keys (defeats alias/case/expr/* PII bypasses).
+        tree = assert_read_only(sql, dialect=self.guarded_bq.dialect)
+        projections = projection_sources(tree)
+        # 3. run through the guard (cost guard etc.); the same validated SQL runs
         raw_rows = self.guarded_bq.run(sql)
         raw_rows = [dict(r) for r in raw_rows] if raw_rows else []
-        # 3. 🔴 MASK the rows BEFORE the model sees them
-        masked = mask_rows(raw_rows, self.columns, mask=mask)
-        # 4. answer from the MASKED rows only
+        # 4. 🔴 MASK by AST source BEFORE the model sees the rows
+        masked = mask_rows(raw_rows, self.columns, mask=mask, projections=projections)
+        # 5. answer from the MASKED rows only
         answer = self.answer_generator.answer_rows(question, masked)
         return SqlAnswer(question=question, sql=sql, rows=masked, answer=answer,
                          masked=mask, columns=self.columns)

@@ -12,6 +12,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from rag_engine.connectors.bigquery import FakeBigQueryClient, GuardedBigQuery  # noqa: E402
@@ -75,7 +77,34 @@ def test_agent_cannot_run_unsafe_sql():
     fake_bq = FakeBigQueryClient(dry_run_bytes=1)
     g = GuardedBigQuery(fake_bq, _PART, _CAP)
     agent = TextToSqlAgent(gen, g, masked_columns=())
-    import pytest
     with pytest.raises(AstGateError):
         agent.answer("evil")
     assert not fake_bq.executed   # never ran
+
+
+# ---- CRITICAL-fix E2E: alias/case/expr/* never leak via the full agent path ----
+
+
+@pytest.mark.parametrize("sql,row", [
+    ("SELECT customer_email AS em FROM s WHERE ss_sold_date_sk >= '2024-01-01'",
+     {"em": _RAW_EMAIL}),                                                   # alias
+    ("SELECT customer_email FROM s WHERE ss_sold_date_sk >= '2024-01-01'",
+     {"CUSTOMER_EMAIL": _RAW_EMAIL}),                                       # case
+    ("SELECT UPPER(customer_email) AS u FROM s WHERE ss_sold_date_sk >= '2024-01-01'",
+     {"u": _RAW_EMAIL}),                                                    # expression
+    ("SELECT * FROM s WHERE ss_sold_date_sk >= '2024-01-01'",
+     {"customer_email": _RAW_EMAIL, "fare": 1.0}),                          # star
+])
+def test_pii_bypass_vectors_never_reach_generator(sql, row):
+    rec = RecordingGenerator()
+    gen = FakeSqlGenerator({"q": sql})
+    fake_bq = FakeBigQueryClient(dry_run_bytes=10, rows=[row])
+    g = GuardedBigQuery(fake_bq, _PART, _CAP)
+    agent = TextToSqlAgent(gen, g, masked_columns=("customer_email",),
+                           answer_generator=rec)
+    res = agent.answer("q", mask=True)
+    # raw PII NEVER in the model input, the answer, or the returned rows
+    assert _RAW_EMAIL not in rec.last_context, f"LEAK to model via: {sql}"
+    assert _RAW_EMAIL not in res.answer
+    assert _RAW_EMAIL not in str(res.rows)
+    assert "[REDACTED]" in rec.last_context

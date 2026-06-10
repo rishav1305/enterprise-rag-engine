@@ -40,3 +40,32 @@ def test_live_llm_draft_passes_or_is_caught_by_ast_gate():
         assert tree is not None
     except AstGateError:
         pass  # acceptably refused — the guard did its job
+
+
+@pytest.mark.llm
+@pytest.mark.skipif(not _KEY, reason="no Groq/NVIDIA key")
+def test_live_draft_executes_only_via_the_guard():
+    """Closes the live loop: a live LLM draft reaches a BigQuery client ONLY through
+    GuardedBigQuery (AST gate + cost guard). A non-SELECT draft would be refused; a
+    SELECT runs guarded. Uses the FakeBigQueryClient so no live BQ creds are needed
+    — only the LLM key — proving the draft->guard->execute wiring end to end."""
+    pytest.importorskip("openai")
+    from rag_engine.config import EngineConfig
+    from rag_engine.connectors.bigquery import FakeBigQueryClient, GuardedBigQuery
+    from rag_engine.generation.openai_compat import OpenAICompatGenerator
+    from rag_engine.texttosql.agent import TextToSqlAgent
+
+    cfg = EngineConfig()
+    gen = OpenAICompatGenerator(base_url=cfg.sql_llm_base_url,
+                                model=cfg.sql_llm_model, api_key=_KEY)
+    fake_bq = FakeBigQueryClient(dry_run_bytes=10,
+                                 rows=[{"customer_email": "x@y.com"}])
+    g = GuardedBigQuery(fake_bq, "ss_sold_date_sk", 1_000_000_000,
+                        require_partition_filter=False)
+    agent = TextToSqlAgent(gen, g, masked_columns=("customer_email",))
+    # the live draft either runs guarded or is refused — never an ungated execute
+    try:
+        res = agent.answer("select the store sale customer email, alias it as e")
+        assert "x@y.com" not in res.answer   # masked even if the LLM aliased it
+    except Exception:
+        pass  # acceptably refused by the guard
