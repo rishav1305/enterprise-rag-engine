@@ -14,7 +14,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from rag_engine.config import EngineConfig  # noqa: E402
-from rag_engine.governance.audit_sink import InMemoryAuditSink  # noqa: E402
 from rag_engine.observability.tracer import InMemorySpanCollector, Tracer  # noqa: E402
 from rag_engine.pipeline import RAGPipeline  # noqa: E402
 from rag_engine.schemas import Document, SecurityContext, Session  # noqa: E402
