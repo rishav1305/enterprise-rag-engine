@@ -55,10 +55,32 @@ def redact_chunk(sc: ScoredChunk, decision: GovernanceDecision) -> ScoredChunk:
     ``allow`` passes through unchanged. ``mask``/``partial`` get content replaced
     with the redaction token so generation + citations never see the raw value.
     Fail-closed: an unknown non-allow decision is treated as a full redaction.
+
+    P0.10 — NON-TEXT (image/table/ocr/figure): you can't ``[REDACTED]`` a pixel
+    inline, so a masked non-text chunk is WITHHELD: the raw payload is stripped from
+    metadata and the content becomes a modality-aware withhold token. Without this,
+    copying ``metadata`` verbatim would leak the raw image/table bytes past a mask.
     """
     if decision.decision == "allow":
         return sc
-    token = _token_for(decision) or _REDACTIONS[MaskReason.PII_MASK]
+
+    modality = getattr(sc.chunk, "modality", "text")
+
+    if modality != "text":
+        # WITHHOLD the raw payload (the enforcement half for non-text). Deep-copy +
+        # scrub the metadata down to a scalar allowlist so NO payload survives
+        # anywhere (a sidecar key / nested thumbnail / structured table), and the
+        # redacted chunk aliases no mutable object from the original.
+        from ..multimodal.payload import scrub_metadata_for_withhold
+
+        metadata = scrub_metadata_for_withhold(sc.chunk.metadata)
+        base = _token_for(decision) or _REDACTIONS[MaskReason.PII_MASK]
+        token = f"{base} [{modality} withheld]"
+    else:
+        # text: shallow copy is fine (content is a string, no nested payload).
+        metadata = dict(sc.chunk.metadata)
+        token = _token_for(decision) or _REDACTIONS[MaskReason.PII_MASK]
+
     redacted = EnrichedChunk(
         chunk_id=sc.chunk.chunk_id,
         parent_doc_id=sc.chunk.parent_doc_id,
@@ -67,7 +89,8 @@ def redact_chunk(sc: ScoredChunk, decision: GovernanceDecision) -> ScoredChunk:
         contextual_anchor="",  # drop the anchor too — it may echo raw content
         security=sc.chunk.security,
         ordinal=sc.chunk.ordinal,
-        metadata=dict(sc.chunk.metadata),
+        modality=modality,
+        metadata=metadata,
     )
     return ScoredChunk(
         chunk=redacted, score=sc.score,
