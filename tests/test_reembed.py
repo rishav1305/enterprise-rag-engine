@@ -26,7 +26,7 @@ def _store(surreal_local):
                       db=surreal_local["db"], user=surreal_local["user"],
                       password=surreal_local["pass"])
     st.connect()
-    st.apply_schema(vector_dim=8)   # small dim so the HNSW index matches our test vecs
+    st.apply_schema()   # default dim (shared DB; do NOT redefine the index)
     return st
 
 
@@ -42,13 +42,13 @@ def test_reembed_preserves_security_context(surreal_local):
     st = _store(surreal_local)
     # a class-F exec-comp chunk with a non-trivial ACL
     st.upsert_chunk({"chunk_id": "doc:1", "asset_id": "a1", "cls": "F", "level": 5,
-                     "text": "exec compensation details", "vec": [0.0] * 8,
+                     "text": "exec compensation details", "vec": [0.0] * 1024,
                      "embedder_version": "ra1"})
     before = st.get_chunk_row("doc:1")
     cls_before, level_before = before["cls"], before["level"]
 
     cache = _SpyCache()
-    re = ReEmbedder(store=st, embedder=HashingEmbedder(dim=8),
+    re = ReEmbedder(store=st, embedder=HashingEmbedder(dim=1024),
                     new_version="ra2", cache=cache)
     re.reembed_all(old_version="ra1")
 
@@ -66,7 +66,7 @@ def test_reembed_preserves_security_context(surreal_local):
 def test_reembed_does_not_change_governance_decision(surreal_local):
     st = _store(surreal_local)
     st.upsert_chunk({"chunk_id": "doc:2", "asset_id": "a1", "cls": "D", "level": 3,
-                     "text": "customer pii ssn", "vec": [0.0] * 8,
+                     "text": "customer pii ssn", "vec": [0.0] * 1024,
                      "embedder_version": "rb1"})
     source = SurrealChunkSource(st)
     s = Session(user_id="emp", roles=["EMPLOYEE"], clearance_level=2)
@@ -74,7 +74,7 @@ def test_reembed_does_not_change_governance_decision(surreal_local):
     chunk_before = source.get_chunk("doc:2")
     dec_before = access.evaluate(chunk_before, s).decision
 
-    ReEmbedder(st, HashingEmbedder(dim=8), "rb2", _SpyCache()).reembed_all("rb1")
+    ReEmbedder(st, HashingEmbedder(dim=1024), "rb2", _SpyCache()).reembed_all("rb1")
 
     chunk_after = source.get_chunk("doc:2")
     dec_after = access.evaluate(chunk_after, s).decision
@@ -84,11 +84,11 @@ def test_reembed_does_not_change_governance_decision(surreal_local):
 def test_reembed_is_resumable_only_touches_old_version(surreal_local):
     st = _store(surreal_local)
     st.upsert_chunk({"chunk_id": "old", "asset_id": "a1", "cls": "B", "level": 1,
-                     "text": "old version chunk", "vec": [0.0] * 8,
+                     "text": "old version chunk", "vec": [0.0] * 1024,
                      "embedder_version": "rc1"})
     st.upsert_chunk({"chunk_id": "new", "asset_id": "a1", "cls": "B", "level": 1,
-                     "text": "already new chunk", "vec": [1.0] * 8,
+                     "text": "already new chunk", "vec": [1.0] * 1024,
                      "embedder_version": "rc2"})
-    n = ReEmbedder(st, HashingEmbedder(dim=8), "rc2", _SpyCache()).reembed_all("rc1")
+    n = ReEmbedder(st, HashingEmbedder(dim=1024), "rc2", _SpyCache()).reembed_all("rc1")
     assert n == 1                                   # only the rc1 chunk re-embedded
-    assert st.get_chunk_row("new")["vec"] == [1.0] * 8  # the v2 chunk untouched
+    assert st.get_chunk_row("new")["vec"] == [1.0] * 1024  # the v2 chunk untouched
