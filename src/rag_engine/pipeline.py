@@ -99,6 +99,13 @@ class RAGPipeline:
                 ttl_seconds=self.config.cache_ttl_seconds,
                 max_entries=self.config.cache_max_entries,
             )
+        # P0.11a W3: corrective self-RAG loop. Optional; when cfg.selfrag_enabled the
+        # loop drives retrieve->grade->(re-retrieve)->generate->grade with a real
+        # SESSION-SCOPED retrieve_fn (self._retrieve_for_session) — it reformulates
+        # query text only and threads the fixed session, so every iteration is
+        # permission-pre-filtered + the loop self-applies SecurityFilter. Fake grader
+        # by default (no creds).
+        self.selfrag_enabled = self.config.selfrag_enabled
 
     def asset_for(self, parent_doc_id: str):
         """Resolve the governing CatalogAsset for a chunk's source, if cataloged."""
@@ -124,6 +131,43 @@ class RAGPipeline:
         return self.index_documents(MarkdownLoader(corpus_dir).load())
 
     # ---- query --------------------------------------------------------
+    def _run_corrective_loop(self, question: str, session: Session, request_id: str) -> str:
+        """Run the W3 corrective loop and return its answer (or an abstain message).
+
+        The loop's retrieve_fn is the SAME session-scoped retrieve the pipeline uses,
+        so a corrective re-retrieval is permission-pre-filtered; the loop also self-
+        applies SecurityFilter (mask/partial -> redacted) before grading/generating.
+        """
+        from .selfrag.grader import FakeGrader
+        from .selfrag.loop import CorrectiveLoop
+
+        loop = CorrectiveLoop(
+            retrieve_fn=self._retrieve_for_session,   # REAL session-scoped retriever
+            generator=self.generator,
+            grader=FakeGrader(
+                relevance_threshold=self.config.selfrag_relevance_threshold,
+                groundedness_threshold=self.config.selfrag_groundedness_threshold,
+            ),
+            max_iterations=self.config.selfrag_max_iterations,
+            tracer=self.tracer, request_id=request_id,
+        )
+        result = loop.run(question, session)
+        if result.abstained:
+            return "I don't have enough authorized, grounded context to answer that."
+        return result.answer
+
+    def _retrieve_for_session(self, question: str, session: Session):
+        """The session-scoped retrieval seam (the loop's retrieve_fn reuses THIS).
+
+        Vector path: TurboVecRetriever already allowlist-pre-filters at the index
+        (drops denied) + reranks. Lexical fallback: permission-blind retrieve (the L5
+        SecurityFilter is the only gate — the original INTERN-vs-CFO demo story). In
+        BOTH cases the L5 SecurityFilter runs downstream (defense in depth).
+        """
+        if self.vector_retriever is not None:
+            return self.vector_retriever.retrieve_for_session(question, session)
+        return self.retriever.retrieve(question)
+
     def _govern_fn(self, chunk_ids, session) -> list[str]:
         """REAL re-governance for a cache hit: re-run SecurityFilter over the stored
         chunk ids for this session, return the authorized (decision != deny) ids.
@@ -168,16 +212,7 @@ class RAGPipeline:
         # path. A LangfuseExporter is allowlist-filtered, so even these can't leak.
         mode = "vector" if self.vector_retriever is not None else "lexical"
         with self.tracer.span("retrieve", request_id, mode=mode):
-            if self.vector_retriever is not None:
-                # LIVE vector path (P0.2c): allowlist pre-filter at the index +
-                # mandatory rerank. Already permission-scoped to the session; the L5
-                # filter below still runs (masks class-D / records the trail) —
-                # defense in depth (pre-filter drops denied, post-filter masks).
-                candidates = self.vector_retriever.retrieve_for_session(question, session)
-            else:
-                # Permission-BLIND path (the INTERN-vs-CFO leak demo's story): find the
-                # best content regardless of caller; the L5 filter is the only gate.
-                candidates = self.retriever.retrieve(question)
+            candidates = self._retrieve_for_session(question, session)
 
         with self.tracer.span("govern", request_id, n_retrieved=len(candidates)):
             admitted, trail = self.security.apply(candidates, session)
@@ -185,7 +220,15 @@ class RAGPipeline:
 
         citations = build_citations(admitted, self.config)
         with self.tracer.span("generate", request_id, n_admitted=len(admitted)):
-            answer = self.generator.generate(question, admitted)
+            if self.selfrag_enabled:
+                # P0.11a W3: corrective loop with a real session-scoped retrieve_fn.
+                # The loop reformulates query text only, threads the FIXED session, and
+                # self-applies SecurityFilter — so every iteration is permission-pre-
+                # filtered AND mask/partial-redacted. It generates over the loop's
+                # governed context (never the raw candidates).
+                answer = self._run_corrective_loop(question, session, request_id)
+            else:
+                answer = self.generator.generate(question, admitted)
         blocked = sum(1 for d in trail if d.decision == "deny")
 
         # P0.11a W2: cache the GOVERNED result keyed by the session's auth scope. The
