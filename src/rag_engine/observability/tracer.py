@@ -18,6 +18,23 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+# P0.11a W1 — the CLOSED set of span-attribute keys safe to export to Langfuse Cloud.
+# METRIC keys only — NEVER content (answer/chunk text/captions). The exporter filters
+# to this allowlist so a careless span("generate", answer=<raw>) can't leak content.
+# Allowlist (not denylist) -> a NEW key a future caller adds is dropped by DEFAULT
+# (fail-closed): an attribute leaks to Langfuse only if it is explicitly a metric here.
+LANGFUSE_ATTR_ALLOWLIST: frozenset[str] = frozenset({
+    "request_id", "cost_usd", "tokens", "mode", "n_admitted", "n_retrieved",
+    "n_blocked", "decision_counts", "similarity", "scope_fp", "n_chunks",
+    "cache_hit", "iteration", "relevance", "grounded", "action", "duration_s",
+    "chunk_id", "op", "source_version", "architecture",
+})
+
+
+def filter_span_attributes(attributes: dict[str, Any]) -> dict[str, Any]:
+    """Drop every attribute not in LANGFUSE_ATTR_ALLOWLIST (fail-closed)."""
+    return {k: v for k, v in attributes.items() if k in LANGFUSE_ATTR_ALLOWLIST}
+
 
 @dataclass(slots=True)
 class Span:
@@ -74,14 +91,17 @@ class Tracer:
         if otel_cm is not None:
             otel_span = otel_cm.__enter__()
             otel_span.set_attribute("request_id", request_id)
-            for k, v in attributes.items():
+            # FIX7: allowlist-filter OTel attributes too — the no-content guarantee is
+            # exporter-AGNOSTIC (not Langfuse-specific). A non-metric key (e.g. a
+            # leaked answer) never reaches the OTel span either.
+            for k, v in filter_span_attributes(attributes).items():
                 otel_span.set_attribute(k, v)
         try:
             yield sp   # callers can sp.attributes[...] = ... to add cost/token
         finally:
             sp.duration_s = time.perf_counter() - start
             if otel_cm is not None:
-                for k, v in sp.attributes.items():
+                for k, v in filter_span_attributes(sp.attributes).items():
                     otel_span.set_attribute(k, v)
                 otel_cm.__exit__(None, None, None)
             self.collector.collect(sp)
@@ -104,5 +124,8 @@ class LangfuseExporter:  # pragma: no cover - creds-gated live path
         self._lf = Langfuse(public_key=public_key, secret_key=secret_key, host=host)
 
     def collect(self, span: Span) -> None:
-        self._lf.trace(name=span.name, id=span.request_id,
-                       metadata={**span.attributes, "duration_s": span.duration_s})
+        # ALLOWLIST-FILTER before export — a span attribute that isn't a known metric
+        # key (e.g. a leaked answer/chunk text) is dropped, so no content reaches
+        # Langfuse Cloud regardless of what a caller attached.
+        safe = filter_span_attributes({**span.attributes, "duration_s": span.duration_s})
+        self._lf.trace(name=span.name, id=span.request_id, metadata=safe)

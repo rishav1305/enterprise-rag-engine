@@ -43,6 +43,7 @@ class SqlAnswer:
     answer: str
     masked: bool
     columns: tuple[ColumnPolicy, ...] = field(default_factory=tuple)
+    access_denied: bool = False     # P0.11a FIX1: a denied session gets no rows
 
 
 class TextToSqlAgent:
