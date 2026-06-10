@@ -110,6 +110,18 @@ class SurrealStore:
         rows = self._db.query("SELECT * FROM $rid;", {"rid": self._chunk_rid(chunk_id)})
         return rows[0] if rows else None
 
+    def chunks_by_version(self, embedder_version: str) -> list[dict[str, Any]]:
+        """Chunk rows whose embedder_version matches (P0.9 re-embed migration).
+
+        Used by the ReEmbedder to find the chunks still on an old embedding version
+        so re-embedding is resumable + only touches stale rows. Param-bound (SECURE).
+        """
+        rows = self._db.query(
+            "SELECT * FROM chunk WHERE embedder_version = $ev;",
+            {"ev": embedder_version},
+        )
+        return list(rows) if rows else []
+
     def relate_chunks(self, src_chunk_id: str, dst_chunk_id: str) -> None:
         """Create a directed ``links`` graph edge between two chunks (P0.6 graph).
 
