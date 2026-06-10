@@ -18,6 +18,23 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+# P0.11a W1 — the CLOSED set of span-attribute keys safe to export to Langfuse Cloud.
+# METRIC keys only — NEVER content (answer/chunk text/captions). The exporter filters
+# to this allowlist so a careless span("generate", answer=<raw>) can't leak content.
+# Allowlist (not denylist) -> a NEW key a future caller adds is dropped by DEFAULT
+# (fail-closed): an attribute leaks to Langfuse only if it is explicitly a metric here.
+LANGFUSE_ATTR_ALLOWLIST: frozenset[str] = frozenset({
+    "request_id", "cost_usd", "tokens", "mode", "n_admitted", "n_retrieved",
+    "n_blocked", "decision_counts", "similarity", "scope_fp", "n_chunks",
+    "cache_hit", "iteration", "relevance", "grounded", "action", "duration_s",
+    "chunk_id", "op", "source_version", "architecture",
+})
+
+
+def filter_span_attributes(attributes: dict[str, Any]) -> dict[str, Any]:
+    """Drop every attribute not in LANGFUSE_ATTR_ALLOWLIST (fail-closed)."""
+    return {k: v for k, v in attributes.items() if k in LANGFUSE_ATTR_ALLOWLIST}
+
 
 @dataclass(slots=True)
 class Span:
@@ -104,5 +121,8 @@ class LangfuseExporter:  # pragma: no cover - creds-gated live path
         self._lf = Langfuse(public_key=public_key, secret_key=secret_key, host=host)
 
     def collect(self, span: Span) -> None:
-        self._lf.trace(name=span.name, id=span.request_id,
-                       metadata={**span.attributes, "duration_s": span.duration_s})
+        # ALLOWLIST-FILTER before export — a span attribute that isn't a known metric
+        # key (e.g. a leaked answer/chunk text) is dropped, so no content reaches
+        # Langfuse Cloud regardless of what a caller attached.
+        safe = filter_span_attributes({**span.attributes, "duration_s": span.duration_s})
+        self._lf.trace(name=span.name, id=span.request_id, metadata=safe)

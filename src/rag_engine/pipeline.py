@@ -30,6 +30,7 @@ from .governance.audit import AuditLog
 from .governance.citations import build_citations
 from .governance.filter import SecurityFilter
 from .ingestion.markdown_loader import MarkdownLoader, chunk_document
+from .observability.tracer import Tracer
 from .retrieval.hybrid import HybridRetriever
 from .routing.heuristic_router import HeuristicRouter
 from .schemas import Document, EnrichedChunk, RAGResponse, Session
@@ -60,9 +61,15 @@ class RAGPipeline:
         generator: Generator | None = None,
         catalog: "CatalogRegistry | None" = None,
         vector_retriever: "TurboVecRetriever | None" = None,
+        tracer: Tracer | None = None,
     ) -> None:
         self.config = config or EngineConfig()
         self.router = HeuristicRouter()
+        # P0.11a W1: per-request tracing. Spans carry METRIC-ONLY attributes; a
+        # LangfuseExporter (creds-gated) is filtered through LANGFUSE_ATTR_ALLOWLIST
+        # so content can never reach Langfuse. Defaults to an in-memory tracer (no
+        # creds, no network) so the hot path never depends on export.
+        self.tracer = tracer or Tracer(otel=False)
         self.contextualizer = contextualizer or _build_contextualizer(self.config)
         self.retriever = retriever or HybridRetriever(self.config)
         self.security = SecurityFilter()
@@ -102,22 +109,30 @@ class RAGPipeline:
 
     # ---- query --------------------------------------------------------
     def query(self, question: str, session: Session) -> RAGResponse:
+        request_id = self.tracer.new_request_id()
         architecture = self.router.route(question)
-        if self.vector_retriever is not None:
-            # LIVE vector path (P0.2c): allowlist pre-filter at the index +
-            # mandatory rerank. Already permission-scoped to the session; the L5
-            # filter below still runs (masks class-D / records the trail) —
-            # defense in depth (pre-filter drops denied, post-filter masks).
-            candidates = self.vector_retriever.retrieve_for_session(question, session)
-        else:
-            # Permission-BLIND path (the INTERN-vs-CFO leak demo's story): find the
-            # best content regardless of caller; the L5 filter is the only gate.
-            candidates = self.retriever.retrieve(question)
-        admitted, trail = self.security.apply(candidates, session)
+        # P0.11a W1: metric-only spans (NO question/answer/chunk text) around the
+        # path. A LangfuseExporter is allowlist-filtered, so even these can't leak.
+        mode = "vector" if self.vector_retriever is not None else "lexical"
+        with self.tracer.span("retrieve", request_id, mode=mode):
+            if self.vector_retriever is not None:
+                # LIVE vector path (P0.2c): allowlist pre-filter at the index +
+                # mandatory rerank. Already permission-scoped to the session; the L5
+                # filter below still runs (masks class-D / records the trail) —
+                # defense in depth (pre-filter drops denied, post-filter masks).
+                candidates = self.vector_retriever.retrieve_for_session(question, session)
+            else:
+                # Permission-BLIND path (the INTERN-vs-CFO leak demo's story): find the
+                # best content regardless of caller; the L5 filter is the only gate.
+                candidates = self.retriever.retrieve(question)
+
+        with self.tracer.span("govern", request_id, n_retrieved=len(candidates)):
+            admitted, trail = self.security.apply(candidates, session)
         self.audit.record(session, question, trail)
 
         citations = build_citations(admitted, self.config)
-        answer = self.generator.generate(question, admitted)
+        with self.tracer.span("generate", request_id, n_admitted=len(admitted)):
+            answer = self.generator.generate(question, admitted)
         blocked = sum(1 for d in trail if d.decision == "deny")
 
         return RAGResponse(
