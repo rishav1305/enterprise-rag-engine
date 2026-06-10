@@ -13,8 +13,10 @@ from .grader import (
     RelevanceGrade,
 )
 from .loop import CorrectiveLoop, LoopResult, LoopStep
+from .openai_grader import OpenAICompatGrader
 
 __all__ = [
-    "Grader", "FakeGrader", "RelevanceGrade", "GroundednessGrade",
+    "Grader", "FakeGrader", "OpenAICompatGrader",
+    "RelevanceGrade", "GroundednessGrade",
     "CorrectiveLoop", "LoopResult", "LoopStep",
 ]
