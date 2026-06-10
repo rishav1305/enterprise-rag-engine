@@ -14,8 +14,12 @@ derives its allowlist from the REAL store (not in-memory doubles):
 
 from __future__ import annotations
 
+import logging
+
 from ..catalog.connector import _CLASS_ROLES
 from ..schemas import EnrichedChunk, SecurityContext
+
+_log = logging.getLogger("rag_engine.store.chunk_source")
 
 
 def _bare_id(rid) -> str:
@@ -67,6 +71,12 @@ class SurrealChunkSource:
             security = _security(row["cls"], row["level"])
         except KeyError:
             # malformed row (unknown/missing class) -> NOT retrievable (fail-closed).
+            # TRANSPARENT: surface the drop (a malformed governance row is a real
+            # data-integrity signal, not something to swallow silently).
+            _log.warning(
+                "chunk %s dropped: unknown/missing sensitivity class %r (fail-closed)",
+                chunk_id, row.get("cls"),
+            )
             return None
         cid = _bare_id(row.get("id", chunk_id))
         return EnrichedChunk(
@@ -89,7 +99,13 @@ class SurrealChunkSource:
             try:
                 security = _security(row["cls"], row["level"])
             except KeyError:
-                continue  # malformed row -> excluded from the allowlist (fail-closed)
+                # malformed row -> excluded from the allowlist (fail-closed).
+                # TRANSPARENT: log the skip so a corrupt governance row is observable.
+                _log.warning(
+                    "chunk %s excluded from allowlist: unknown/missing class %r (fail-closed)",
+                    row.get("id"), row.get("cls"),
+                )
+                continue
             out.append(
                 EnrichedChunk(
                     chunk_id=_bare_id(row["id"]),

@@ -224,21 +224,26 @@ Where no true public dataset exists (HR comp, CRM, Slack, M&A, procurement, tick
 
 ## 6. What's built vs roadmap (PMB-style honesty for the public doc)
 
+> **Status note (updated 2026-06-09):** the **decomposition** (`docs/superpowers/plans/2026-06-08-p0-decomposition.md`) is the authoritative per-phase status; this table is the public-doc summary. P0.1a–P0.2d are merged to `main`.
+
 | Capability | Status |
 |---|---|
 | 5-layer offline engine, hybrid retrieve, governance post-filter, leak demo, eval gate, FastAPI | ✅ Built (bundle) |
-| Unified multi-connector catalog + verticals + personas + Sources page | ⏳ This project |
-| BigQuery text-to-SQL backend (NYC TLC, GDELT) + partition pruning + `maximum_bytes_billed` cost guard | ⏳ This project |
-| Opaque-schema semantic glossary subsystem | ⏳ This project |
-| SurrealDB unified store (graph + structured + full-text + catalog) + TurboVec compressed vector index | ⏳ This project |
-| Funnel visual + scale math + provenance/scale badges | ⏳ This project |
-| Index-level pre-filter governance (replacing post-filter at scale) | 🔭 Roadmap |
-| Re-embedding/version-migration, CDC streaming ingestion, semantic cache | 🔭 Roadmap |
-| Self-RAG / corrective grading, true agentic loop backend | 🔭 Roadmap |
+| Unified multi-connector catalog + verticals + personas (+ leak-audit oracle, 210-cell) | ✅ Built (P0.1a/b) |
+| SurrealDB unified store (graph + structured + full-text + catalog) + TurboVec compressed vector index | ✅ Built (P0.2a/b) |
+| **Index-level pre-filter governance** (allowlist drop-before-search at the vector index; wired LIVE + store-backed) | ✅ Built (P0.2b/c/d) — was "Roadmap"; delivered for the vector mode |
+| BigQuery text-to-SQL backend (NYC TLC, GDELT) + partition pruning + `maximum_bytes_billed` cost guard | ⏳ P0.3a/b |
+| Opaque-schema semantic glossary subsystem | ⏳ P0.4 |
+| Funnel visual + scale math + provenance/scale badges | ⏳ P0.5/P0.6 |
+| Index-level pre-filter for the OTHER modes (graph/SQL/lexical) + ReBAC sub-linear allowlist | ⏳ P0.6 |
+| Re-embedding/version-migration, CDC streaming ingestion, semantic cache | ⏳ P0.7/P0.9 |
+| Self-RAG / corrective grading, true agentic loop backend | ⏳ P0.8 |
 
 ---
 
 ## 7. Phase plan (high level — detailed steps come from `writing-plans`)
+
+> **AUTHORITATIVE PHASE MAP:** this original list collapsed P0.2/P0.3 into single phases; execution split them (P0.1a/b, P0.2a/b/c/d, P0.3a/b, …). See `docs/superpowers/plans/2026-06-08-p0-decomposition.md` for the authoritative, status-tracked phase list. The list below is the original sketch, kept for provenance.
 
 1. **P0.0 Repo readiness** — extracted ✅; add `docs/`, decide remote (Gitea private vs GitHub public — `git-remote-policy`).
 2. **P0.1 Catalog core** — `catalog/` registry, `Connector` ABC, extend `SecurityContext` to assets/columns, verticals + personas, leak audit over the catalog.
@@ -340,4 +345,6 @@ Principle: **adopt mature tools *around* the differentiators; keep the different
 
 ---
 
-*Status 2026-06-08: engine extracted to `~/project-m/projects/enterprise-rag-engine/`. Spec covers architecture (SurrealDB hybrid + TurboVec + BigQuery PB tail), tooling (§9), and platform/cost (§10). §8 decisions RESOLVED: SurrealDB hybrid (account created), BigQuery, Groq+NVIDIA LLM (OpenAI-compatible), dual remote (GitHub + Gitea), Vercel Hobby ($0). SOVEREIGN dropped per project-m policy. Demo ≈ $0/mo. Next: user review, then `writing-plans` for P0.1.*
+*Status 2026-06-08 (original): engine extracted; spec covers architecture (SurrealDB hybrid + TurboVec + BigQuery PB tail), tooling (§9), platform/cost (§10); §8 decisions RESOLVED. SOVEREIGN dropped per project-m policy. Demo ≈ $0/mo.*
+
+*Status 2026-06-09 (autonomous run): **P0.1a–P0.2d merged to `main`** — Meridian data foundation, catalog + governance-v2 (210-cell leak oracle), SurrealDB unified store, TurboVec vector index + allowlist permission pre-filter (wired LIVE + store-backed). The §7 phase numbering below predates the P0.2a–P0.2d split — the **decomposition** (`docs/superpowers/plans/2026-06-08-p0-decomposition.md`) is the authoritative phase map + status. Remaining: P0.3a (BigQuery + SQL safety) → P0.3b → P0.4 (glossary) → P0.5 (funnel/obs) → P0.6 (pre-filter all modes + ReBAC) → P0.7 (semantic cache) → P0.8 (self-RAG/agentic) → P0.9 (CDC/re-embed) → P0.10 (multimodal) → P0.11 (demo surface + Ledger).*

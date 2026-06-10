@@ -266,3 +266,19 @@ def test_bogus_cls_denied_end_to_end_via_retriever(surreal_local):
     cand_ids = {h.chunk.chunk_id for h in retriever.retrieve_for_session("exec comp", emp)}
     assert "bad-000001" not in cand_ids   # bogus-class chunk NEVER retrieved
     st.close()
+
+
+def test_malformed_row_drop_is_logged_transparent(surreal_local, caplog):
+    """TRANSPARENT: dropping a malformed-class row must be observable (logged),
+    not silent — a corrupt governance row is a real data-integrity signal."""
+    import logging
+    st = _fresh_store(surreal_local, "cs_log")
+    st.upsert_chunk({"chunk_id": "bad-000001", "asset_id": "bad", "cls": "ZZ",
+                     "level": 1, "text": "x", "vec": [0.0] * 128})
+    source = SurrealChunkSource(st)
+    with caplog.at_level(logging.WARNING, logger="rag_engine.store.chunk_source"):
+        assert source.get_chunk("bad-000001") is None
+        _ = source.all_chunk_security()
+    msgs = " ".join(r.message for r in caplog.records)
+    assert "unknown/missing" in msgs and "ZZ" in msgs   # both paths logged the drop
+    st.close()
