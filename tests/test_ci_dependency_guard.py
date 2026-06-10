@@ -110,3 +110,19 @@ def test_sqlglot_is_importable_in_dev_env():
     # the SQL-safety subjects import cleanly (guards against a masked import error)
     from rag_engine.connectors.bigquery import GuardedBigQuery  # noqa: F401
     from rag_engine.sql.ast_gate import assert_read_only  # noqa: F401
+
+
+def _semantic_router_installed() -> bool:
+    return importlib.util.find_spec("semantic_router") is not None
+
+
+def test_semantic_router_is_importable_in_dev_env():
+    """semantic-router powers the P0.3b adaptive router. In a dev env it MUST be
+    present — FAIL loudly (not skip) so the router tests can't silently skip."""
+    dev_env = os.getenv("RAG_DEV_ENV") == "1"
+    if not dev_env and not _semantic_router_installed():
+        pytest.skip("runtime-only env (set RAG_DEV_ENV=1 in CI to enforce)")
+    import semantic_router  # noqa: F401
+    assert _semantic_router_installed()
+    from rag_engine.routing.semantic_router import SemanticRouter  # noqa: F401
+    from rag_engine.texttosql.agent import TextToSqlAgent  # noqa: F401
