@@ -99,6 +99,25 @@ class EngineConfig:
         default_factory=lambda: os.getenv("RAG_CACHE_BACKEND", "memory")
     )
 
+    # self-RAG / corrective loop (P0.8) — CONFIGURABLE, no magic numbers. The loop
+    # is BOUNDED (RESILIENT: max_iterations caps re-retrieval so it can't spin).
+    selfrag_enabled: bool = field(
+        default_factory=lambda: os.getenv("RAG_SELFRAG_ENABLED", "1") != "0"
+    )
+    selfrag_max_iterations: int = field(
+        default_factory=lambda: int(os.getenv("RAG_SELFRAG_MAX_ITERATIONS", "3"))
+    )
+    selfrag_relevance_threshold: float = field(
+        default_factory=lambda: float(os.getenv("RAG_SELFRAG_RELEVANCE", "0.3"))
+    )
+    selfrag_groundedness_threshold: float = field(
+        default_factory=lambda: float(os.getenv("RAG_SELFRAG_GROUNDEDNESS", "0.6"))
+    )
+    # "fake" (deterministic, tests/offline default) | "openai" (Groq/NVIDIA, gated).
+    selfrag_grader: str = field(
+        default_factory=lambda: os.getenv("RAG_SELFRAG_GRADER", "fake")
+    )
+
     def __post_init__(self) -> None:
         # Schema validation (CONFIGURABLE pillar): invalid config REFUSES to start —
         # never silently falls back to a default that could mask a misconfiguration.
@@ -118,6 +137,26 @@ class EngineConfig:
         if self.cache_backend not in ("memory", "surreal"):
             raise ValueError(
                 f"cache_backend must be 'memory' or 'surreal', got {self.cache_backend!r}"
+            )
+        # self-RAG knobs
+        if self.selfrag_max_iterations < 1:
+            raise ValueError(
+                f"selfrag_max_iterations must be >= 1 (RESILIENT bound), got "
+                f"{self.selfrag_max_iterations}"
+            )
+        if not (0.0 < self.selfrag_relevance_threshold <= 1.0):
+            raise ValueError(
+                f"selfrag_relevance_threshold must be in (0.0, 1.0], got "
+                f"{self.selfrag_relevance_threshold}"
+            )
+        if not (0.0 < self.selfrag_groundedness_threshold <= 1.0):
+            raise ValueError(
+                f"selfrag_groundedness_threshold must be in (0.0, 1.0], got "
+                f"{self.selfrag_groundedness_threshold}"
+            )
+        if self.selfrag_grader not in ("fake", "openai"):
+            raise ValueError(
+                f"selfrag_grader must be 'fake' or 'openai', got {self.selfrag_grader!r}"
             )
 
     @property
