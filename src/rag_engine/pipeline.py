@@ -153,6 +153,60 @@ class RAGPipeline:
         return self.index_documents(MarkdownLoader(corpus_dir).load())
 
     # ---- query --------------------------------------------------------
+    def apply_change(self, event) -> bool:
+        """W7 — apply a CDC ChunkChangeEvent to the live pipeline (store + cache).
+
+        Governance propagation: a reclassify/delete updates the in-memory chunk set
+        (so the next query re-derives governance from the NEW classification) AND
+        invalidates the semantic cache for that chunk (so a stale permissive entry
+        can't serve now-restricted content). Version-ordered + idempotent via the
+        CdcProcessor. Returns True if applied, False if dropped (stale/replay).
+        """
+        from .cdc.events import ChangeOp
+
+        # a PERSISTENT processor (built once) so its per-chunk version-ordering map
+        # survives across events — a stale/replayed event is dropped correctly.
+        proc = self._cdc_processor()
+        applied = proc.apply(event)
+        if applied and event.op is not ChangeOp.DELETE:
+            self.retriever.index(self._chunks)
+        return applied
+
+    def _cdc_processor(self):
+        """Lazily build + cache the pipeline's CdcProcessor (in-memory store+cache
+        adapters). One instance so version-ordering state persists across events."""
+        if getattr(self, "_cdc", None) is not None:
+            return self._cdc
+        from .cdc.processor import CdcProcessor
+
+        pipe = self
+
+        class _InMemStore:
+            def upsert_chunk(self, chunk):
+                from .schemas import EnrichedChunk, SecurityContext
+                cid = chunk["chunk_id"]
+                sec = SecurityContext(
+                    allowed_roles=chunk.get("allowed_roles", []),
+                    clearance_level=chunk.get("level", 0),
+                    sensitivity_class=chunk.get("cls", ""),
+                    need_to_know_roles=chunk.get("need_to_know", []),
+                )
+                new = EnrichedChunk(chunk_id=cid, parent_doc_id=chunk.get("asset_id", cid),
+                                    parent_title=chunk.get("asset_id", cid),
+                                    content=chunk.get("text", ""), security=sec)
+                pipe._chunks = [c for c in pipe._chunks if c.chunk_id != cid] + [new]
+
+            def delete_chunk(self, chunk_id):
+                pipe._chunks = [c for c in pipe._chunks if c.chunk_id != chunk_id]
+
+        class _NoCache:
+            def invalidate_chunk(self, chunk_id):
+                pass
+
+        cache_adapter = self.cache if self.cache is not None else _NoCache()
+        self._cdc = CdcProcessor(_InMemStore(), cache_adapter)
+        return self._cdc
+
     def query_warehouse(self, question: str, session: Session, agent, asset):
         """W5 — answer a warehouse-SQL question through the text-to-SQL agent with the
         mask flag DERIVED from governance over the warehouse asset for this session
@@ -255,6 +309,8 @@ class RAGPipeline:
         # P0.11a W1: metric-only spans (NO question/answer/chunk text) around the
         # path. A LangfuseExporter is allowlist-filtered, so even these can't leak.
         mode = "vector" if self.vector_retriever is not None else "lexical"
+        # W7: the query path selects the configured embedder_version (a re-embed
+        # migration bumps this + invalidates the old cache); recorded on the span.
         with self.tracer.span("retrieve", request_id, mode=mode):
             candidates = self._retrieve_for_session(question, session)
 

@@ -110,6 +110,12 @@ class EngineConfig:
         default_factory=lambda: int(os.getenv("RAG_MM_MAX_PAYLOAD_BYTES",
                                               str(25 * 1024 * 1024)))
     )
+    # P0.11a W7: the embedder version the query path selects (re-embed migration). A
+    # query reads chunks at this version; a re-embed bumps it + invalidates the old
+    # cache. Default matches the offline HashingEmbedder.
+    embedder_version: str = field(
+        default_factory=lambda: os.getenv("RAG_EMBEDDER_VERSION", "hashing-v1")
+    )
 
     # self-RAG / corrective loop (P0.8) — CONFIGURABLE, no magic numbers. The loop
     # is BOUNDED (RESILIENT: max_iterations caps re-retrieval so it can't spin).
