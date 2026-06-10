@@ -54,3 +54,47 @@ class Glossary:
 
     def __len__(self) -> int:
         return len(self._by_key)
+
+
+class SurrealGlossaryStore:
+    """Persist/load the glossary in SurrealDB (the governed glossary store, §3.3).
+
+    Entries live in a ``glossary`` table keyed by ``<table>__<physical>``; reload
+    reconstructs an in-memory ``Glossary``. RecordID-param bound (no injection).
+    """
+
+    def __init__(self, store) -> None:
+        self.store = store
+
+    @staticmethod
+    def _rid(table: str, physical: str):
+        from surrealdb import RecordID
+
+        return RecordID("glossary", f"{table}__{physical}")
+
+    def save(self, glossary: Glossary) -> int:
+        n = 0
+        for e in glossary.all():
+            self.store._db.query(
+                "UPSERT $rid CONTENT $data;",
+                {"rid": self._rid(e.table, e.physical),
+                 "data": {"physical": e.physical, "table": e.table, "means": e.means,
+                          "synonyms": list(e.synonyms), "examples": list(e.examples),
+                          "confidence": e.confidence, "source": e.source,
+                          "join_paths": list(e.join_paths)}},
+            )
+            n += 1
+        return n
+
+    def load(self) -> Glossary:
+        rows = self.store._db.query("SELECT * FROM glossary;")
+        g = Glossary()
+        for row in (rows or []):
+            g.add(GlossaryEntry(
+                physical=row["physical"], table=row["table"], means=row["means"],
+                synonyms=tuple(row.get("synonyms", [])),
+                examples=tuple(row.get("examples", [])),
+                confidence=row.get("confidence", "low"), source=row.get("source", ""),
+                join_paths=tuple(row.get("join_paths", [])),
+            ))
+        return g
