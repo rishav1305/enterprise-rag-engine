@@ -10,10 +10,29 @@ fail=0
 ok()   { echo "  ✓ $1"; }
 bad()  { echo "  ✗ $1"; fail=1; }
 
+warm() {
+  local hits=0 i code
+  echo "  …warming the instance (free-tier cold start ~30-60s)…"
+  for i in $(seq 1 60); do
+    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$URL/health")
+    if [ "$code" = "200" ]; then hits=$((hits+1)); else hits=0; fi
+    [ "$hits" -ge 3 ] && { echo "  ✓ warm ($hits consecutive 200)"; return 0; }
+    sleep 2
+  done
+  echo "  ✗ never warmed after ~120s"; return 1
+}
+retry_code() { local want="$1"; shift; local c i; for i in 1 2 3 4 5; do
+  c=$(curl -s -o /dev/null -w '%{http_code}' "$@");
+  [ "$c" = "$want" ] && { echo "$c"; return 0; }
+  case "$c" in 000|404|502|503) sleep 3;; *) echo "$c"; return 0;; esac
+done; echo "$c"; }
+
+warm || { echo "✗ GATE B FAIL — backend never became reachable."; exit 1; }
+
 echo "== Gate B pre-publish checklist: $URL =="
 
 # 1. liveness
-code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/health")
+code=$(retry_code 200 --max-time 30 "$URL/health")
 [ "$code" = "200" ] && ok "/health 200 (backend reachable)" || bad "/health returned $code"
 
 # 2. governed query works + a denied persona's response carries NO ACL trail
