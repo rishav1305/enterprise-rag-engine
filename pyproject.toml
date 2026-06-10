@@ -52,6 +52,8 @@ markers = [
     "bq: tests that hit live BigQuery (creds-gated; run with -m bq). CI runs -m 'not bq'.",
     "llm: tests that hit a live Groq/NVIDIA LLM (creds-gated; run with -m llm). CI runs -m 'not llm'.",
     "langfuse: tests that hit live Langfuse (creds-gated; run with -m langfuse). CI runs -m 'not langfuse'.",
+    "spicedb: tests that hit a live self-hosted SpiceDB (binary/creds-gated; run with -m spicedb). CI runs -m 'not spicedb'.",
+    "oso: tests that hit live Oso Cloud (creds-gated; run with -m oso). CI runs -m 'not oso'.",
 ]
 filterwarnings = [
     # semantic-router 0.1.2 uses deprecated pydantic v1 .dict()/.json() internally;
