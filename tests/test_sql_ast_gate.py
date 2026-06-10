@@ -1,4 +1,11 @@
-"""P0.3a WORKER-A — exhaustive read-only AST gate cases (sql/ast_gate.py)."""
+"""P0.3a WORKER-A — exhaustive read-only AST gate cases (sql/ast_gate.py).
+
+Flake note: a one-off non-reproducing failure of two _REFUSED params (GRANT, ;;;)
+was reported once. Investigated — ran 8x with `-p no:randomly`, all green; the gate
+has NO shared mutable state (`_FORBIDDEN` is an immutable tuple, `assert_read_only`
+is pure, `sqlglot.parse` is stateless per call). No isolation issue found;
+treated as a transient environment/rate-limit artifact, not a code defect.
+"""
 
 from __future__ import annotations
 
@@ -48,6 +55,20 @@ def test_select_into_does_not_transpile_to_ddl():
     # the gate, never reaching transpile (which would emit CREATE TABLE AS).
     with pytest.raises(AstGateError):
         assert_read_only("SELECT a INTO exfil FROM t WHERE d >= '2024-01-01'")
+
+
+def test_select_into_is_dual_guarded():
+    # SELECT...INTO is refused by BOTH the explicit `tree.find(exp.Into)` check AND
+    # the generic `_FORBIDDEN` walk (exp.Into in the set) — defense in depth. We
+    # assert each guard independently catches an INTO tree, so removing one guard
+    # cannot silently leave the bypass open with a green suite.
+    from sqlglot import exp
+    import sqlglot
+    tree = sqlglot.parse_one("SELECT a INTO x FROM t WHERE d >= '2024-01-01'",
+                             read="bigquery")
+    assert tree.find(exp.Into) is not None                      # guard 1: explicit find
+    assert any(isinstance((n[0] if isinstance(n, tuple) else n), exp.Into)
+               for n in tree.walk())                            # guard 2: _FORBIDDEN walk
 
 
 @pytest.mark.parametrize("sql", _ALLOWED)

@@ -31,6 +31,16 @@ def test_partition_filter_present_passes():
     )
 
 
+def test_partition_filter_is_name_presence_only_documented_softspot():
+    # PINS the documented contract: assert_partition_filter is NAME-PRESENCE only,
+    # so it PASSES on a non-pruning predicate like `... OR pickup_datetime>'x'` and
+    # on a same-named column from a join. This is intentional — the dry-run BYTE
+    # CAP is the enforcing backstop (see cost_guard.py). If a future change tightens
+    # this to a top-level conjunctive predicate, THIS test must be updated
+    # deliberately (it documents that the soft-spot is a known, backstopped choice).
+    assert_partition_filter(_tree(f"SELECT a FROM t WHERE vendor_id=1 OR {_PART}>'x'"), _PART)
+
+
 def test_no_where_clause_refused():
     with pytest.raises(CostGuardError):
         assert_partition_filter(_tree("SELECT a FROM t"), _PART)

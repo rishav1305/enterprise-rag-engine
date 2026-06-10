@@ -39,6 +39,24 @@ def test_over_cap_refused_before_execute():
     with pytest.raises(CostGuardError):
         g.run(f"SELECT a FROM trips WHERE {_PART} >= '2024-01-01'")
     assert not fake.executed
+    # this is a CAP refusal, not an AST refusal: the dry-run DID run (estimate
+    # computed), execute did not. Distinguishes it from a refuse-at-the-gate case.
+    assert fake.dry_run_targets
+
+
+def test_byte_cap_refuses_unpruned_via_dry_run_pruning_model():
+    # partition GATE disabled -> the BYTE CAP is the lever that must catch an
+    # unpruned scan (the fake models pruning: unpruned -> large bytes).
+    fake = FakeBigQueryClient(dry_run_bytes=100_000_000, partition_col=_PART,
+                              unpruned_bytes=9_000_000_000)
+    g = GuardedBigQuery(fake, _PART, _CAP, require_partition_filter=False)
+    # unpruned (no partition col in SQL) -> dry-run returns 9GB -> over the 1GB cap
+    with pytest.raises(CostGuardError):
+        g.run("SELECT a FROM trips WHERE vendor_id = 1")
+    assert fake.dry_run_targets and not fake.executed   # cap refusal (dry-run ran)
+    # pruned (partition col present) -> 100MB -> under cap -> executes
+    rows = g.run(f"SELECT a FROM trips WHERE {_PART} >= '2024-01-01'")
+    assert rows and fake.executed
 
 
 def test_dml_refused_before_execute():
@@ -71,11 +89,19 @@ def test_select_into_refused_execute_never_called():
 def test_dry_run_target_equals_execute_target():
     # IMPORTANT regression: the cap is checked against the SAME string that runs
     # (transpile FIRST, then dry-run AND execute the transpiled SQL).
+    #
+    # Uses a NON-CANONICAL input so transpile genuinely rewrites it: a double-
+    # quoted literal `"2024-01-01"` becomes single-quoted `'2024-01-01'` in the
+    # BigQuery dialect. So raw != transpiled, and this test BITES — mutating run()
+    # back to dry_run_bytes_for(raw_sql) makes dry_run_target != execute_target.
     fake = FakeBigQueryClient(dry_run_bytes=10)
     g = GuardedBigQuery(fake, _PART, _CAP)
-    g.run(f"SELECT a FROM trips WHERE {_PART} >= '2024-01-01'")
+    raw = f'SELECT a FROM trips WHERE {_PART} >= "2024-01-01"'
+    g.run(raw)
     assert fake.dry_run_targets and fake.executed
-    assert fake.dry_run_targets[-1] == fake.executed[-1]   # same string
+    assert fake.dry_run_targets[-1] == fake.executed[-1]    # same (transpiled) string
+    assert fake.executed[-1] != raw                          # transpile DID rewrite it
+    assert "'2024-01-01'" in fake.executed[-1]               # single-quoted in BQ dialect
 
 
 def test_from_config_uses_config_cap_and_partition_flag(monkeypatch):

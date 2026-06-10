@@ -60,7 +60,7 @@ SKIPS=$(PYTHONPATH=src "$PYTHON" -m pytest -m "not cloud and not bq" -rs -q \
     tests/test_surreal_store.py tests/test_surreal_connector.py \
     tests/test_turbovec_retriever_unit.py tests/test_c1_over_vector_e2e.py \
     tests/test_surreal_chunksource_unit.py tests/test_store_backed_e2e.py \
-    tests/test_sql_ast_gate.py tests/test_bq_cost_guard.py \
+    tests/test_sql_safety_inline.py tests/test_sql_ast_gate.py tests/test_bq_cost_guard.py \
     tests/test_bigquery_connector.py tests/test_warehouse_governance.py \
     tests/test_ci_dependency_guard.py 2>&1 | grep -c -E '^SKIPPED' || true)
 if [ "$SKIPS" -ne 0 ]; then

@@ -34,16 +34,32 @@ class BigQueryClient(Protocol):
 
 
 class FakeBigQueryClient:
-    """Local test double: records executes, returns a stubbed dry-run estimate."""
+    """Local test double: records executes, returns a stubbed dry-run estimate.
 
-    def __init__(self, dry_run_bytes: int, rows: list[Any] | None = None) -> None:
+    By default returns a fixed ``dry_run_bytes``. To model partition pruning (so a
+    test can prove the BYTE CAP refuses an unpruned query — not just the partition
+    gate), pass ``partition_col`` + ``unpruned_bytes``: the estimate is
+    ``unpruned_bytes`` when the partition column is absent from the SQL, and
+    ``dry_run_bytes`` (small) when present — mirroring how a real BigQuery dry-run
+    bills the full partitioned table for an unpruned scan.
+    """
+
+    def __init__(self, dry_run_bytes: int, rows: list[Any] | None = None,
+                 partition_col: str | None = None,
+                 unpruned_bytes: int | None = None) -> None:
         self.dry_run_bytes = dry_run_bytes
         self.rows = rows if rows is not None else [("row",)]
         self.executed: list[str] = []
         self.dry_run_targets: list[str] = []  # records what was estimated
+        self.partition_col = partition_col
+        self.unpruned_bytes = unpruned_bytes
 
     def dry_run_bytes_for(self, sql: str) -> int:
         self.dry_run_targets.append(sql)
+        if self.partition_col is not None and self.unpruned_bytes is not None:
+            # pruned (partition col present) -> small; unpruned -> large.
+            return (self.dry_run_bytes if self.partition_col in sql
+                    else self.unpruned_bytes)
         return self.dry_run_bytes
 
     def execute(self, sql: str, max_bytes_billed: int) -> list[Any]:
