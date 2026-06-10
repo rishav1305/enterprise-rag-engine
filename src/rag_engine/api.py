@@ -19,23 +19,30 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Header
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
+from .config import EngineConfig
+from .deploy.guards import RateLimiter, RateLimitExceeded, assert_synthetic_only
 from .pipeline import RAGPipeline
 from .schemas import RAGResponse, Session
 
 _CORPUS = Path(os.getenv("RAG_CORPUS_DIR", Path(__file__).resolve().parents[2] / "corpus"))
 
-_state: dict[str, RAGPipeline] = {}
+_state: dict[str, object] = {}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    pipeline = RAGPipeline()
+    cfg = EngineConfig()
+    # GATE B: refuse to start if the synthetic demo profile can reach a real source.
+    assert_synthetic_only(cfg)
+    pipeline = RAGPipeline(config=cfg)
     count = pipeline.index_corpus(_CORPUS)
     app.state.indexed_chunks = count
     _state["pipeline"] = pipeline
+    # GATE B: per-key abuse cap (rate-limit + per-day) BEFORE any LLM/embedding call.
+    _state["rate_limiter"] = RateLimiter(cfg.rate_limit_per_min, cfg.query_cap_per_day)
     yield
     _state.clear()
 
@@ -59,6 +66,15 @@ def query(
     x_user_roles: str = Header(default="PUBLIC"),
     x_clearance: int = Header(default=0),
 ) -> RAGResponse:
+    # GATE B: abuse cap keyed by user id, BEFORE the (potentially live) LLM/embedding
+    # call. A public URL backed by live keys would otherwise let anyone run up bills.
+    limiter = _state.get("rate_limiter")
+    if limiter is not None:
+        try:
+            limiter.check(x_user_id)
+        except RateLimitExceeded as e:
+            raise HTTPException(status_code=429, detail=e.reason) from e
+
     session = Session(
         user_id=x_user_id,
         roles=[r.strip() for r in x_user_roles.split(",") if r.strip()],

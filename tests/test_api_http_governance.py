@@ -98,3 +98,27 @@ def test_unknown_body_fields_rejected_or_ignored(client):
     assert r.status_code in (200, 422)
     if r.status_code == 200:
         assert not _restricted_leaked(r.json())
+
+
+def test_rate_limit_returns_429_over_http(monkeypatch):
+    # GATE B over the wire: a low per-min cap -> the Nth+1 request gets HTTP 429.
+    monkeypatch.setenv("RAG_RATE_LIMIT_PER_MIN", "2")
+    monkeypatch.setenv("RAG_QUERY_CAP_PER_DAY", "1000")
+    from rag_engine.api import app
+    with TestClient(app) as c:
+        h = {"X-User-Id": "abuser", "X-User-Roles": "PUBLIC", "X-Clearance": "0"}
+        assert c.post("/query", json={"question": "hi"}, headers=h).status_code == 200
+        assert c.post("/query", json={"question": "hi"}, headers=h).status_code == 200
+        r = c.post("/query", json={"question": "hi"}, headers=h)
+        assert r.status_code == 429   # 3rd within the minute -> rate-limited
+
+
+def test_startup_refuses_live_source_in_synthetic_profile(monkeypatch):
+    # GATE B refuse-to-start: a live LLM credential under the synthetic profile must
+    # prevent the app from starting (lifespan raises).
+    monkeypatch.setenv("GROQ_API_KEY", "sk-live-demo-key")
+    monkeypatch.setenv("RAG_DEMO_PROFILE", "synthetic")
+    from rag_engine.api import app
+    with pytest.raises(RuntimeError, match="SYNTHETIC-ONLY"):
+        with TestClient(app):
+            pass
