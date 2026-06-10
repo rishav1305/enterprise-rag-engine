@@ -91,14 +91,17 @@ class Tracer:
         if otel_cm is not None:
             otel_span = otel_cm.__enter__()
             otel_span.set_attribute("request_id", request_id)
-            for k, v in attributes.items():
+            # FIX7: allowlist-filter OTel attributes too — the no-content guarantee is
+            # exporter-AGNOSTIC (not Langfuse-specific). A non-metric key (e.g. a
+            # leaked answer) never reaches the OTel span either.
+            for k, v in filter_span_attributes(attributes).items():
                 otel_span.set_attribute(k, v)
         try:
             yield sp   # callers can sp.attributes[...] = ... to add cost/token
         finally:
             sp.duration_s = time.perf_counter() - start
             if otel_cm is not None:
-                for k, v in sp.attributes.items():
+                for k, v in filter_span_attributes(sp.attributes).items():
                     otel_span.set_attribute(k, v)
                 otel_cm.__exit__(None, None, None)
             self.collector.collect(sp)

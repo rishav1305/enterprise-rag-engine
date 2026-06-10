@@ -45,3 +45,43 @@ def test_no_secret_substring_survives():
     attrs = {"answer": "SENTINEL_PII_SECRET", "request_id": "r", "cost_usd": 0.0}
     out = filter_span_attributes(attrs)
     assert "SENTINEL_PII_SECRET" not in json.dumps(out)
+
+
+def test_otel_set_attribute_is_allowlist_filtered():
+    """FIX7 — OTel span attributes are allowlist-filtered too (exporter-agnostic). A
+    recording fake OTel tracer captures set_attribute calls; a content key must never
+    reach it."""
+    from rag_engine.observability.tracer import Tracer
+
+    class _RecSpan:
+        def __init__(self):
+            self.attrs = {}
+
+        def set_attribute(self, k, v):
+            self.attrs[k] = v
+
+    class _RecCM:
+        def __init__(self, span):
+            self.span = span
+
+        def __enter__(self):
+            return self.span
+
+        def __exit__(self, *a):
+            return False
+
+    class _RecOtel:
+        def __init__(self):
+            self.span = _RecSpan()
+
+        def start_as_current_span(self, name):
+            return _RecCM(self.span)
+
+    rec = _RecOtel()
+    t = Tracer(otel=False)
+    t._otel = rec   # inject the recording OTel tracer
+    with t.span("generate", "r1", tokens=5, answer="LEAKED_SECRET_ANSWER"):
+        pass
+    assert "answer" not in rec.span.attrs          # content key dropped
+    assert rec.span.attrs.get("tokens") == 5       # metric key kept
+    assert "LEAKED_SECRET_ANSWER" not in str(rec.span.attrs)

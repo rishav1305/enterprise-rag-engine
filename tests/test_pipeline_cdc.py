@@ -63,6 +63,30 @@ def test_reclassify_up_denies_under_cleared_next_query():
     assert access.evaluate(chunk_after, under).decision == "deny"
 
 
+def test_reclassify_up_denies_via_query_end_to_end():
+    """The reclassify-deny must hold through the REAL pipeline.query (not just
+    access.evaluate): after a B->F reclassify, the under-cleared session's ANSWER no
+    longer contains the secret. BITES if the query path doesn't re-derive governance
+    from the updated chunk."""
+    pipe = _pipeline_with_b_chunk()
+    under = Session(user_id="emp", roles=["EMPLOYEE"], clearance_level=2)
+    cid = _chunk_id(pipe)
+
+    # BEFORE: class-B -> the under-cleared session's query CAN surface the content.
+    before = pipe.query("project notes", under)
+    assert SECRET in before.answer   # authorized while class-B
+
+    pipe.apply_change(ChunkChangeEvent(
+        ChangeOp.RECLASSIFY, cid, 2,
+        {"asset_id": "doc1", "cls": "F", "level": 5,
+         "allowed_roles": ["C_SUITE"], "need_to_know": ["C_SUITE"],
+         "text": f"Project notes (now restricted) {SECRET}."}))
+
+    # AFTER: the SAME query through the pipeline -> the secret is withheld (deny).
+    after = pipe.query("project notes", under)
+    assert SECRET not in after.answer, "reclassify-deny did not propagate to query()"
+
+
 def test_reclassify_invalidates_stale_cache():
     pipe = _pipeline_with_b_chunk()           # cache enabled by default
     cfo = Session(user_id="cfo", roles=["C_SUITE"], clearance_level=5)

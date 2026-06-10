@@ -218,13 +218,25 @@ class RAGPipeline:
         a non-`allow` decision on the asset, result rows are masked.
         """
         from .governance import access
+        from .texttosql.agent import SqlAnswer
 
         # synthetic chunk carrying the asset's SecurityContext -> the real decision.
         probe = EnrichedChunk(chunk_id=asset.asset_id, parent_doc_id=asset.asset_id,
                               parent_title=asset.asset_id, content="",
                               security=asset.security)
         decision = access.evaluate(probe, session).decision
-        mask = decision != "allow"   # allow -> raw; mask/partial/deny -> masked
+
+        # FIX1: a DENY decision short-circuits BEFORE drafting/running SQL — the text
+        # path drops denied content before the model, the warehouse path must too.
+        # mask-only column redaction would leak a non-flagged column raw to a denied
+        # session; deny means NO rows reach the model at all (fail-closed).
+        if decision == "deny":
+            return SqlAnswer(question=question, sql="", rows=[],
+                             answer="You are not authorized to access this data.",
+                             masked=True, columns=tuple(asset.columns),
+                             access_denied=True)
+
+        mask = decision != "allow"   # allow -> raw; mask/partial -> column-masked
         # ColumnPolicy from the catalog asset (single governance source), not literals.
         agent.columns = tuple(asset.columns)
         return agent.answer(question, mask=mask)

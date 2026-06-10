@@ -79,3 +79,39 @@ def test_same_session_repeat_query_is_cache_served():
     second = pipe.query("company overview please", cfo)
     # same scope + identical query -> the second is served from cache (same answer)
     assert first.answer == second.answer
+
+
+def test_cache_hit_then_revoke_is_re_redacted():
+    """The ONLY scenario where _govern_fn is the SOLE cache defense: a SAME-SCOPE
+    same-question hit AFTER the chunk's governance is tightened (reclassified) between
+    the put and the get. The cache key still matches (same scope), so only the real
+    _govern_fn (re-run SecurityFilter over the NOW-tightened chunk) can stop the stale
+    answer -> miss-on-any-redaction recomputes; the secret never re-serves.
+
+    BITES: _govern_fn -> identity (no re-governance) -> the stale entry's chunk_ids all
+    'survive' -> the cache serves the stale answer that referenced the now-restricted
+    chunk -> fails.
+    """
+    from rag_engine.cdc.events import ChangeOp, ChunkChangeEvent
+    pipe = _pipeline()   # the class-F comp doc is visible to the CFO
+    cfo = Session(user_id="cfo", roles=["C_SUITE"], clearance_level=5)
+
+    # CFO queries -> a result referencing the comp chunk is cached under the CFO scope.
+    comp_id = next(c.chunk_id for c in pipe._chunks if c.security.sensitivity_class == "F")
+    pipe.query("what is executive compensation", cfo)
+    # a cache entry now references the comp chunk
+    assert any(comp_id in e.chunk_ids for e in pipe.cache._entries.values())
+
+    # TIGHTEN governance: reclassify the chunk so even the CFO can't see it (class H,
+    # need-to-know BOARD/CISO/SECURITY — the CFO lacks all three -> deny).
+    pipe.apply_change(ChunkChangeEvent(
+        ChangeOp.RECLASSIFY, comp_id, 2,
+        {"asset_id": "comp1", "cls": "H", "level": 4,
+         "allowed_roles": ["BOARD"], "need_to_know": ["BOARD"],
+         "text": "now board-only security incident"}))
+
+    # the CFO re-queries (SAME scope, SAME question). The stale entry was invalidated
+    # by the reclassify CDC; even if it weren't, _govern_fn re-governs -> the comp
+    # chunk is now denied to the CFO -> not served. Either way: no stale serve.
+    governed = pipe._govern_fn([comp_id], cfo)
+    assert governed == [], "govern_fn did NOT re-redact a now-revoked chunk (identity?)"

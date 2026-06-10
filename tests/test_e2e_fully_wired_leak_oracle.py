@@ -12,9 +12,19 @@ For each persona x class cell:
     MASK/PARTIAL -> the raw secret is withheld/redacted (token, not the raw marker);
     ALLOW -> retrievable (no leak violation — the marker MAY appear).
 
-MUTATION: disable ANY single component's governance step (e.g. the L5 SecurityFilter,
-or the cache govern_fn, or the loop self-redact) -> a deny/mask cell leaks the secret
--> this oracle fails. Proves the master oracle exercises each component's governance live.
+Each cell is queried TWICE — the second is a cache HIT for the same session+question,
+so the cache RETRIEVAL path (get -> re-govern -> record_cache_hit) runs live (a single
+query is always a miss). The cached answer was itself produced from GOVERNED context at
+put-time, so under STATIC governance the served answer stays safe regardless — the
+cache's _govern_fn is the SOLE defense only when governance CHANGES between put and a
+same-scope get, which is covered e2e by test_pipeline_cache.test_cache_hit_then_revoke_
+is_re_redacted (a govern_fn->identity there leaks). Here the oracle proves the cache
+RETRIEVAL path composes without leaking, and the answer-producing governance:
+
+MUTATION: disable the L5 SecurityFilter (govern step) OR the corrective loop's
+self-redact (selfrag-on answer path) -> a deny/mask cell leaks the secret -> this
+oracle fails. (The cache govern_fn's bite is proven in the same-scope revoke test, not
+here, since static governance never makes the stored answer unsafe.)
 """
 
 from __future__ import annotations
@@ -74,17 +84,19 @@ def test_e2e_fully_wired_leak_oracle():
         for cls, expected in expectations[pkey].items():
             cells += 1
             marker = _marker(cls)
-            # query for this class's content through the FULLY-WIRED pipeline.
-            resp = pipe.query(f"tell me about class {cls} {CLASSES[cls].name}", session)
-            answer = resp.answer or ""
-            if expected == "deny":
-                if marker in answer:
+            q = f"tell me about class {cls} {CLASSES[cls].name}"
+            # Query TWICE: the first populates the cache, the second is a CACHE HIT for
+            # the same session+question -> it drives the cache's _govern_fn LIVE (a
+            # single query is always a miss, leaving _govern_fn unexercised). Both
+            # responses must hold the oracle decision.
+            for _ in range(2):
+                resp = pipe.query(q, session)
+                answer = resp.answer or ""
+                if expected == "deny" and marker in answer:
                     leaks.append(f"DENY-LEAK {pkey} x {cls}: secret in answer")
-            elif expected in ("mask", "partial"):
-                # the RAW secret must be withheld/redacted (a token, not the marker).
-                if marker in answer:
+                elif expected in ("mask", "partial") and marker in answer:
                     leaks.append(f"{expected.upper()}-LEAK {pkey} x {cls}: raw secret in answer")
-            # allow: retrievable, no violation to assert (marker may appear)
+                # allow: retrievable, no violation to assert (marker may appear)
 
     assert cells == 210, f"expected 210 cells, ran {cells}"
     assert not leaks, "MASTER ORACLE LEAKS:\n" + "\n".join(leaks[:20])

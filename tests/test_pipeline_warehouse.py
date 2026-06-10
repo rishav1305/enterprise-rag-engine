@@ -67,6 +67,41 @@ def test_cleared_session_gets_raw_warehouse_result():
     assert any(r["customer_email"] == _RAW_EMAIL for r in res.rows)
 
 
+def _denied_asset():
+    # a class-F (exec-comp, NTK C_SUITE, L5) warehouse asset with a NON-masked column
+    # (salary). An under-cleared session gets DENY -> must get NO rows (the column is
+    # not flagged masked, so mask-only redaction would leak it raw).
+    return CatalogAsset(
+        asset_id="warehouse_payroll", vertical="hr", retrieval_mode="text_to_sql",
+        sensitivity_class="F",
+        security=SecurityContext(allowed_roles=["C_SUITE"], clearance_level=5,
+                                 sensitivity_class="F", need_to_know_roles=["C_SUITE"]),
+        columns=(ColumnPolicy(name="salary", pii=False, masked=False),),  # NOT flagged
+    )
+
+
+def _salary_agent():
+    gen = FakeSqlGenerator({"payroll": f"SELECT salary FROM s WHERE {_PART} >= '2024-01-01'"})
+    g = GuardedBigQuery(FakeBigQueryClient(dry_run_bytes=10, rows=[{"salary": 999999}]),
+                        _PART, 1_000_000_000)
+    return TextToSqlAgent(gen, g)
+
+
+def test_denied_session_gets_no_warehouse_rows():
+    """A DENY decision must short-circuit BEFORE running SQL — the text path drops
+    deny before the model, the warehouse path must too. mask-only column redaction
+    would leak a non-flagged column (salary) raw to a denied session.
+
+    BITES: collapse deny->mask (run the query) -> the raw salary surfaces -> fails.
+    """
+    pipe = RAGPipeline()
+    intern = Session(user_id="intern", roles=["INTERN"], clearance_level=1)
+    res = pipe.query_warehouse("payroll", intern, _salary_agent(), _denied_asset())
+    assert res.rows == [], "WAREHOUSE DENY LEAK: denied session got rows"
+    assert "999999" not in str(res.rows) and "999999" not in res.answer
+    assert res.access_denied is True
+
+
 def test_mask_flag_is_governance_derived_not_literal():
     # the SAME query/asset yields different mask outcomes purely from the session's
     # clearance -> the flag is session-governance-driven, not hardcoded.
