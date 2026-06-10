@@ -59,6 +59,55 @@ def health() -> dict:
     return {"status": "ok", "indexed_chunks": app.state.indexed_chunks}
 
 
+@app.get("/personas")
+def personas() -> dict:
+    """B2 — read-only switcher metadata: persona title/roles/clearance ONLY (no
+    content). The UI uses this to populate the persona dropdown; the actual governance
+    happens server-side from the headers, never from this list."""
+    from seeds.emit import build_oracle
+
+    p = build_oracle()["personas"]
+    return {"personas": [
+        {"key": k, "title": v["title"], "roles": list(v["roles"]),
+         "clearance": v["level"]}
+        for k, v in p.items()
+    ]}
+
+
+@app.get("/glossary")
+def glossary() -> dict:
+    """B4 — read-only opaque-schema mapping (text_2 -> "customer name"). Exposes ONLY
+    the schema mapping (table/physical/meaning/confidence) — NO row data, NO example
+    values (which could carry real-shaped data)."""
+    from .enrichment.schema_glossary.view_miner import mine_views
+
+    try:
+        from seeds.synthetic.legacy_mart import LEGACY_VIEWS
+        mined = mine_views(LEGACY_VIEWS)   # {(table, physical): meaning}
+        entries = [{"table": t, "physical": p, "means": m, "confidence": "high"}
+                   for (t, p), m in sorted(mined.items())]
+    except Exception:
+        entries = []
+    return {"glossary": entries}   # mapping only — NO row data / example values
+
+
+@app.get("/funnel")
+def funnel() -> dict:
+    """B5 — read-only PB->TB->GB scale viz. Stated scale numbers + the stage collapse
+    only — no row content."""
+    pipe = _state["pipeline"]
+    catalog = getattr(pipe, "catalog", None)
+    stages = []
+    if catalog is not None:
+        try:
+            from .funnel.trace import compute_funnel
+            t = compute_funnel(catalog, candidate_counts={}, pb_tail_asset_ids=[])
+            stages = t.to_rows()
+        except Exception:
+            stages = []
+    return {"funnel": stages}
+
+
 @app.post("/query", response_model=RAGResponse)
 def query(
     req: QueryRequest,

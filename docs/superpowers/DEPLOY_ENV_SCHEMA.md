@@ -24,6 +24,6 @@ FastAPI URL — not a secret). Enforced by the B6 client-bundle no-secrets scan.
 | `POST /query` | persona switcher, provenance, cost/token | ✅ B1 `test_api_http_governance` (HTTP TestClient; intern can't retrieve restricted; no body self-escalation) — mutation-proven |
 | `GET /health` | liveness | n/a (no content) |
 | `GET /personas` (new) | switcher options | B2 — read-only metadata, no restricted content |
-| `POST /warehouse` (new, IF demo'd) | governed SQL masking | B3 — HTTP e2e leak incl. deny→no-rows, OR not exposed |
+| `POST /warehouse` | governed SQL masking | **NOT EXPOSED** — the demo headline is the persona switcher over /query; the warehouse SQL path is proven at the pipeline level (query_warehouse, deny short-circuit) but is NOT given an HTTP endpoint, minimizing the public attack surface per Gate A. If a future demo exposes it, it ships WITH a biting HTTP e2e leak test (deny→no-rows). |
 | `GET /glossary` (new) | text_2→"customer name" | B4 — opaque mapping only, no row data |
 | `GET /funnel` (new) | PB→TB→GB | B5 — stated scale numbers only |
