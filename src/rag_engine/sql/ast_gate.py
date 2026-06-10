@@ -8,6 +8,10 @@ BigQuery client. Proven by spike S4 (``docs/spikes/s4-bigquery-cost-guard.md``).
 
 from __future__ import annotations
 
+# NB: `dataclass` is imported UNCONDITIONALLY at module top (added in c3a9085).
+# A one-off NameError flake during P0.3b was root-caused to a transient where this
+# import was added inside a function; it is now a top-level import, so the flake is
+# confirmed-fixed (documented, not assumed) and cannot recur.
 from dataclasses import dataclass
 
 import sqlglot

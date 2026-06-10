@@ -44,10 +44,26 @@ def test_lexical_query_routes_to_agentic(router):
     assert router.route("ticket MER-12345 status") == RAGArchitecture.AGENTIC_LOOP
 
 
-def test_unknown_query_falls_back_to_hybrid(router):
-    # an out-of-distribution query must still return a valid architecture (fail-safe)
-    out = router.route("xyzzy plugh frobnicate qux")
-    assert isinstance(out, RAGArchitecture)
+def test_no_confident_route_falls_back_to_hybrid():
+    # When the underlying router returns NO confident route (name=None), route()
+    # falls back to the vector/hybrid leg (fail-safe). We assert the EXACT default
+    # by driving the mapping with a None-named choice, so a regression in the
+    # `.get(name, ADVANCED_HYBRID)` default bites. Uses a FRESH router (not the
+    # module fixture) so the monkeypatch can't leak into other tests.
+    r = SemanticRouter()
+
+    class _NoMatch:
+        name = None
+
+    r._router = lambda q: _NoMatch()
+    assert r.route("anything") == RAGArchitecture.ADVANCED_HYBRID
+
+
+def test_ood_query_still_returns_a_valid_architecture():
+    # belt-and-suspenders: an out-of-distribution string returns SOME valid enum
+    # (never crashes), even if the encoder weakly matches a route.
+    r = SemanticRouter()
+    assert isinstance(r.route("xyzzy plugh frobnicate qux"), RAGArchitecture)
 
 
 def test_no_llm_in_hot_path():

@@ -108,3 +108,22 @@ def test_pii_bypass_vectors_never_reach_generator(sql, row):
     assert _RAW_EMAIL not in res.answer
     assert _RAW_EMAIL not in str(res.rows)
     assert "[REDACTED]" in rec.last_context
+
+
+@pytest.mark.parametrize("unsafe", [
+    "INSERT INTO s (a) VALUES (1)",
+    "UPDATE s SET a = 1 WHERE ss_sold_date_sk >= '2024-01-01'",
+    "SELECT a FROM s WHERE ss_sold_date_sk >= '2024-01-01'; DROP TABLE s",  # multi-statement
+    "SELECT a INTO exfil FROM s WHERE ss_sold_date_sk >= '2024-01-01'",      # CTAS-in-disguise
+])
+def test_agent_refuses_non_drop_unsafe_sql(unsafe):
+    # the agent only emits guarded SQL — INSERT/UPDATE/stacked/INTO are all refused
+    # before execute (not just DROP).
+    from rag_engine.sql.ast_gate import AstGateError
+    gen = FakeSqlGenerator({"q": unsafe})
+    fake_bq = FakeBigQueryClient(dry_run_bytes=1)
+    g = GuardedBigQuery(fake_bq, _PART, _CAP)
+    agent = TextToSqlAgent(gen, g, masked_columns=())
+    with pytest.raises(AstGateError):
+        agent.answer("q")
+    assert not fake_bq.executed   # never ran
