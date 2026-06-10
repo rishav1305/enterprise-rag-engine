@@ -6,5 +6,7 @@ permission boundary. The cache key incorporates the session's authorization scop
 """
 
 from .key import AuthScope
+from .observability import record_cache_hit
+from .semantic_cache import CachedResult, SemanticCache
 
-__all__ = ["AuthScope"]
+__all__ = ["AuthScope", "SemanticCache", "CachedResult", "record_cache_hit"]
