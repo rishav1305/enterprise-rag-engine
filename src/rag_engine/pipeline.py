@@ -131,6 +131,28 @@ class RAGPipeline:
         return self.index_documents(MarkdownLoader(corpus_dir).load())
 
     # ---- query --------------------------------------------------------
+    def query_warehouse(self, question: str, session: Session, agent, asset):
+        """W5 — answer a warehouse-SQL question through the text-to-SQL agent with the
+        mask flag DERIVED from governance over the warehouse asset for this session
+        (NOT a literal), and the ColumnPolicy sourced from the catalog asset.
+
+        The agent already: validates the drafted SQL via the AST gate, runs it through
+        GuardedBigQuery (cost guard), and masks result rows BY AST SOURCE before the
+        model. Here we make the mask decision session-driven: if the session would get
+        a non-`allow` decision on the asset, result rows are masked.
+        """
+        from .governance import access
+
+        # synthetic chunk carrying the asset's SecurityContext -> the real decision.
+        probe = EnrichedChunk(chunk_id=asset.asset_id, parent_doc_id=asset.asset_id,
+                              parent_title=asset.asset_id, content="",
+                              security=asset.security)
+        decision = access.evaluate(probe, session).decision
+        mask = decision != "allow"   # allow -> raw; mask/partial/deny -> masked
+        # ColumnPolicy from the catalog asset (single governance source), not literals.
+        agent.columns = tuple(asset.columns)
+        return agent.answer(question, mask=mask)
+
     def _run_corrective_loop(self, question: str, session: Session, request_id: str) -> str:
         """Run the W3 corrective loop and return its answer (or an abstain message).
 
