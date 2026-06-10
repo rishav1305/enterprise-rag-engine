@@ -40,10 +40,17 @@ S1 ─► P0.1a ─► P0.1b ─┬─► P0.2a ─► P0.2b ─► P0.2c ─►
 ```
 
 ## Spikes
-- **S1 TurboVec-in-serverless** ✅ done — KEEP.
-- **S2 SurrealDB 4-mode** — first task inside P0.2a.
-- **S3 Wren-AI-vs-glossary** — first task inside P0.4.
+- **S1 TurboVec-in-serverless** ✅ done — KEEP (`docs/spikes/s1-turbovec-serverless.md`).
+- **S2 SurrealDB 4-mode** ✅ done — KEEP (`docs/spikes/s2-surrealdb-four-mode.md`).
+- **S3 Wren-AI-vs-glossary** — first task inside P0.4 (decision pending — default: keep the first-party build).
 - **S4 BigQuery cost guard** — first task inside P0.3a.
 
+## Tracked follow-ons (not yet built — explicit so they aren't lost)
+- **Recall on REAL Voyage embeddings (not the CI HashingEmbedder):** P0.2b re-validated recall on clustered + HashingEmbedder vectors (honest ~0.45 tight / ~0.90+ text; reranker recovers). The production embedder is Voyage-3-large — recall on *real Voyage* embeddings is a **creds-gated** validation to run when a Voyage key is available (the offline build path). Until then the reranker-load-bearing finding stands. → fold into P0.2b-followup / the offline-build phase.
+- **Adaptive router:** still the regex `HeuristicRouter`. **semantic-router** (spec §9, MIT, local, embedding-similarity) replaces it on the vector path. → P0.3b ("router learns indexable-derivative vs PB-tail") is the natural home; adopt semantic-router there.
+- **ReBAC sub-linear allowlist:** `authorized_chunk_ids` is O(N)/query (P0.2d note). Oso/SpiceDB list-objects (spec §9) → P0.6 (pre-filter all modes) or its own task.
+- **Malformed-row audit:** TRANSPARENT logging added in the retro (chunk_source drops are logged); a durable audit-sink record for dropped governance rows is a P0.5 (observability) item.
+- **Index-level pre-filter for graph/SQL/lexical modes:** P0.2 delivered it for the *vector* mode only; the other modes still post-filter → P0.6.
+
 ## Workflow
-Git worktree per phase; executing-plans in batches-of-3; code-reviewer between batches; finishing-a-development-branch at end. Dual remote (GitHub public + Gitea private), `git-remote-policy` verified before first GitHub push. Gates are mandatory CEO pauses — drive up, stop, report.
+Git worktree per phase; executing-plans in batches; **direct review between batches + Friday's independent review fan-out at each phase completion**; finishing-a-development-branch at end. Push branches + `main` to **GitHub** (Gitea skipped while titan-pc down). **Per-phase CEO pause WAIVED for the autonomous completion run** (CEO directive 2026-06-09) — quality gates stay; stop only for genuine blockers (missing creds where a phase's CORE needs them, infra down).
