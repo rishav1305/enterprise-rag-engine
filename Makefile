@@ -20,3 +20,6 @@ lint:
 	ruff check src tests
 clean:
 	rm -rf .pytest_cache **/__pycache__ .ruff_cache build dist *.egg-info
+
+deploy-check:   ## GATE B pre-publish checklist vs a live backend URL (URL=...)
+	@scripts/deploy-check.sh $(URL)

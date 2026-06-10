@@ -134,15 +134,22 @@ def health() -> dict:
 def personas() -> dict:
     """B2 — read-only switcher metadata: persona title/roles/clearance ONLY (no
     content). The UI uses this to populate the persona dropdown; the actual governance
-    happens server-side from the headers, never from this list."""
-    from seeds.emit import build_oracle
+    happens server-side from the headers, never from this list.
 
-    p = build_oracle()["personas"]
-    return {"personas": [
-        {"key": k, "title": v["title"], "roles": list(v["roles"]),
-         "clearance": v["level"]}
-        for k, v in p.items()
-    ]}
+    Sourced from the runtime-safe ``demo_data`` (the lean prod container does NOT install
+    the seed-generation deps); falls back to the seed package when available (dev)."""
+    from .demo_data import DEMO_PERSONAS
+
+    try:
+        from seeds.emit import build_oracle
+        p = build_oracle()["personas"]
+        return {"personas": [
+            {"key": k, "title": v["title"], "roles": list(v["roles"]),
+             "clearance": v["level"]}
+            for k, v in p.items()
+        ]}
+    except Exception:
+        return {"personas": DEMO_PERSONAS}
 
 
 @app.get("/glossary")
@@ -150,15 +157,17 @@ def glossary() -> dict:
     """B4 — read-only opaque-schema mapping (text_2 -> "customer name"). Exposes ONLY
     the schema mapping (table/physical/meaning/confidence) — NO row data, NO example
     values (which could carry real-shaped data)."""
-    from .enrichment.schema_glossary.view_miner import mine_views
+    from .demo_data import DEMO_GLOSSARY, DEMO_LEGACY_VIEWS
 
+    # Prefer LIVE mining (dev, with sqlglot) so the demo reflects the real miner; fall
+    # back to the baked deterministic mapping in the lean prod container (no sqlglot).
     try:
-        from seeds.synthetic.legacy_mart import LEGACY_VIEWS
-        mined = mine_views(LEGACY_VIEWS)   # {(table, physical): meaning}
+        from .enrichment.schema_glossary.view_miner import mine_views
+        mined = mine_views(DEMO_LEGACY_VIEWS)
         entries = [{"table": t, "physical": p, "means": m, "confidence": "high"}
                    for (t, p), m in sorted(mined.items())]
     except Exception:
-        entries = []
+        entries = list(DEMO_GLOSSARY)
     return {"glossary": entries}   # mapping only — NO row data / example values
 
 
