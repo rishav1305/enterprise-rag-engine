@@ -41,6 +41,12 @@ class EngineConfig:
     # router_backend: "heuristic" (regex fast-path, default) | "semantic"
     # (embedding-similarity, local deterministic encoder, no LLM in hot path).
     router_backend: str = field(default_factory=lambda: os.getenv("RAG_ROUTER", "heuristic"))
+    # P0.11a W4: which AllowlistBackend the mode-router uses. "in_process" (default,
+    # the canonical decision source) | "local_rebac" (zero-dep tuple kernel) |
+    # "spicedb" | "oso" (gated). All are parity-guaranteed to agree with in_process.
+    allowlist_backend: str = field(
+        default_factory=lambda: os.getenv("RAG_ALLOWLIST_BACKEND", "in_process")
+    )
     # sql_generator: "fake" (deterministic, tests) | "groq" | "nvidia" (live,
     # OpenAI-compatible, creds-gated).
     sql_generator: str = field(default_factory=lambda: os.getenv("RAG_SQL_GENERATOR", "fake"))
@@ -137,6 +143,11 @@ class EngineConfig:
         if self.cache_backend not in ("memory", "surreal"):
             raise ValueError(
                 f"cache_backend must be 'memory' or 'surreal', got {self.cache_backend!r}"
+            )
+        if self.allowlist_backend not in ("in_process", "local_rebac", "spicedb", "oso"):
+            raise ValueError(
+                f"allowlist_backend must be in_process|local_rebac|spicedb|oso, got "
+                f"{self.allowlist_backend!r}"
             )
         # self-RAG knobs
         if self.selfrag_max_iterations < 1:
