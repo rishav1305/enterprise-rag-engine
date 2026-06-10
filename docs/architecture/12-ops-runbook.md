@@ -64,18 +64,60 @@ fixture for CI and the gated `cloud`/`llm`/`bq`/`langfuse`/`spicedb`/`oso` marke
 
 ## Deploy (go-live)
 
-The demo deploy MUST use `demo_profile=synthetic`. The **three Gate B operational checks hard-block
-public go-live** (deep dive [§11](11-demo-and-deploy-security.md)):
+**Decision:** backend host = **Cloud PaaS** (Fly.io or Render). Go-live = **auto-publish once the
+Gate-B operational checks pass**. The backend runtime is **Python-only** (verified: boots + serves
+governed queries with NO `surreal` binary, NO turbovec, NO live creds — the default `RAGPipeline`
+uses in-memory BM25+dense over the synthetic corpus). Artifacts: `Dockerfile`, `fly.toml`,
+`render.yaml`, `.env.deploy.example`, `scripts/deploy-check.sh`.
 
-1. **rate-limit** (per-key + instance-wide) active;
-2. **synthetic-only refuse-to-start** (no real source reachable);
-3. **client-bundle no-secrets scan** passing (no secret-shaped string, no `NEXT_PUBLIC_*`
-   credential).
+The demo deploy MUST use `demo_profile=synthetic`. The **three Gate B checks hard-block public
+go-live** (deep dive [§11](11-demo-and-deploy-security.md)): (1) rate-limit (per-key + instance-wide)
+active; (2) synthetic-only refuse-to-start; (3) client-bundle no-secrets scan passing.
 
-> **TODO (filled after P0.11c live deploy):**
-> - **Backend host:** `<TBD — CEO infrastructure decision pending>` (FastAPI + the synthetic
->   Meridian corpus; the FE's `CLEARANCE_API_URL` points here).
-> - **Public demo URL:** `https://rishavchatterjee.com/projects/clearance` (frontend; Vercel —
->   note `portfolio_app` auto-deploys `main` → prod, so the clearance route ships on a branch
->   until go-ahead).
-> - **Deployed API base URL:** `<TBD>`.
+### Exact deploy steps
+
+**(a) Deploy the backend** (pick one; the CEO authenticates first — see "credential needs" below).
+
+*Fly.io (always-on, no cold start):*
+```bash
+cd enterprise-rag-engine
+fly auth login                       # interactive — CEO does this once
+fly launch --no-deploy --copy-config # uses fly.toml (app: clearance-demo-api)
+fly deploy                           # builds the Dockerfile, deploys
+```
+
+*Render (GitHub-connect auto-deploy; FREE tier cold-starts ~30–60s):*
+> Connect the repo in the Render dashboard and point it at `render.yaml` (Blueprint), OR
+> `render blueprint launch`. `autoDeploy: true` redeploys on push. Use `plan: starter` for
+> always-on.
+
+**(b) Get the public backend URL** — e.g. `https://clearance-demo-api.fly.dev` (Fly) or the
+Render service URL.
+
+**(c) Set the FE proxy target in Vercel** (the only FE-side secret-ish var; it's a public URL,
+not a credential):
+```bash
+cd portfolio_app
+vercel env add CLEARANCE_API_URL production   # paste the backend URL from (b)
+```
+
+**(d) The Gate-B pre-publish checklist (the automated go-live gate):**
+```bash
+cd enterprise-rag-engine
+make deploy-check URL=https://clearance-demo-api.fly.dev   # must print "GATE B PASS"
+# plus, separately: the client-bundle scan + the leak oracle:
+cd ../portfolio_app && npm run build && npm run scan:bundle  # "client bundle clean"
+cd ../enterprise-rag-engine && make ci                       # 0-skip, leak oracle green
+```
+
+**(e) Publish the FE** (auto, per the CEO's directive — only after (a)–(d) all green):
+```bash
+cd portfolio_app
+git checkout main && git merge --no-ff feat/clearance-demo && git push origin main
+# Vercel auto-deploys main -> https://rishavchatterjee.com/projects/clearance
+```
+
+### Filled URLs (after the live deploy lands)
+> - **Backend host:** Cloud PaaS — `<TBD: clearance-demo-api.fly.dev | render URL>` (set after (a)).
+> - **Deployed API base URL:** `<TBD>` → goes into Vercel `CLEARANCE_API_URL`.
+> - **Public demo URL:** `https://rishavchatterjee.com/projects/clearance`.
