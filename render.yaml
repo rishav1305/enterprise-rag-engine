@@ -1,0 +1,25 @@
+# Render config for the CLEARANCE demo backend (GitHub-connect auto-deploy).
+# Simplest path: connect the repo in the Render dashboard; this blueprint provisions
+# the service. CAVEAT: the FREE tier COLD-STARTS — the service spins down after ~15 min
+# idle and the next request waits ~30-60s for a cold boot. For a responsive always-on
+# demo, prefer Fly.io (fly.toml) or upgrade Render to a paid instance (no spin-down).
+services:
+  - type: web
+    name: clearance-demo-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free                      # COLD-START caveat above; use 'starter' for always-on
+    healthCheckPath: /health
+    autoDeploy: true                # CEO's "auto-publish once gate passes" (backend side)
+    envVars:
+      - key: RAG_DEMO_PROFILE
+        value: synthetic
+      - key: RAG_STORE_BACKEND
+        value: memory
+      - key: RAG_RATE_LIMIT_PER_MIN
+        value: "30"
+      - key: RAG_INSTANCE_RATE_LIMIT_PER_MIN
+        value: "1500"
+      - key: RAG_QUERY_CAP_PER_DAY
+        value: "500"
+      # PORT is injected by Render automatically; uvicorn binds $PORT.

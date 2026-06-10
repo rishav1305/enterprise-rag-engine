@@ -1,0 +1,35 @@
+# Fly.io config for the CLEARANCE demo backend.
+# Deploy: `fly launch --no-deploy` (first time, creates the app) then `fly deploy`.
+# Always-on free allowance keeps the demo responsive (no cold start).
+app = "clearance-demo-api"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  RAG_DEMO_PROFILE = "synthetic"
+  RAG_STORE_BACKEND = "memory"
+  RAG_RATE_LIMIT_PER_MIN = "30"
+  RAG_INSTANCE_RATE_LIMIT_PER_MIN = "1500"
+  RAG_QUERY_CAP_PER_DAY = "500"
+  PORT = "8000"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = false        # always-on -> no cold start for the demo
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.checks]
+    [http_service.checks.health]
+      grace_period = "20s"
+      interval = "30s"
+      method = "GET"
+      path = "/health"
+      timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"                  # pure-Python + 5-doc corpus is light
