@@ -26,6 +26,17 @@ class EngineConfig:
     vector_coarse_k: int = 200      # over-fetch from TurboVec before reranking
     vector_path_rerank_mandatory: bool = True  # documented invariant; non-disableable
 
+    # BigQuery PB-tail cost guard (P0.3a) — CONFIGURABLE, no magic numbers.
+    # maximum_bytes_billed: hard cap on bytes scanned (a dry-run estimate over this
+    # is REFUSED). Default 1 GB keeps the sandbox free tier safe.
+    bq_max_bytes_billed: int = field(
+        default_factory=lambda: int(os.getenv("BQ_MAX_BYTES_BILLED", str(1_000_000_000)))
+    )
+    bq_require_partition_filter: bool = field(
+        default_factory=lambda: os.getenv("BQ_REQUIRE_PARTITION_FILTER", "1") != "0"
+    )
+    bq_dialect: str = field(default_factory=lambda: os.getenv("BQ_DIALECT", "bigquery"))
+
     # generation
     max_quote_chars: int = 240
 

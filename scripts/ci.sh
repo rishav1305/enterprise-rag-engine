@@ -37,29 +37,31 @@ echo "surreal: $(command -v surreal) ($(surreal version 2>/dev/null | head -1))"
 # 3) assert the pinned dev deps are importable (don't let a missing dep skip)
 "$PYTHON" - <<'PY'
 import importlib.util, sys
-missing = [m for m in ("turbovec", "surrealdb", "faker", "polars", "numpy", "pydantic")
+missing = [m for m in ("turbovec", "surrealdb", "faker", "polars", "numpy", "pydantic", "sqlglot")
            if importlib.util.find_spec(m) is None]
 if missing:
     sys.exit(f"FAIL: dev deps missing: {missing}. Run `make dev`.")
 import turbovec
 assert getattr(turbovec, "__version__", "0.7.0")  # pinned ==0.7.0
-print("dev deps OK (turbovec, surrealdb, faker, polars, numpy, pydantic)")
+print("dev deps OK (turbovec, surrealdb, faker, polars, numpy, pydantic, sqlglot)")
 PY
 
 # 4) run the suite (cloud excluded — creds-gated, non-authoritative for the gate)
 #    -W error on unexpected skips is enforced by the in-suite no-skip guards
 #    (tests/test_ci_dependency_guard.py fails-not-skips in RAG_DEV_ENV=1).
 echo "== pytest -m 'not cloud' =="
-PYTHONPATH=src "$PYTHON" -m pytest -m "not cloud" -rs
+PYTHONPATH=src "$PYTHON" -m pytest -m "not cloud and not bq" -rs
 
 # 5) belt-and-suspenders: assert ZERO skips among the headline test modules
 echo "== no-skip assertion (headline governance/turbovec/SurrealDB tests) =="
-SKIPS=$(PYTHONPATH=src "$PYTHON" -m pytest -m "not cloud" -rs -q \
+SKIPS=$(PYTHONPATH=src "$PYTHON" -m pytest -m "not cloud and not bq" -rs -q \
     tests/test_turbovec_index.py tests/test_allowlist_prefilter.py \
     tests/test_turbovec_recall.py tests/test_oracle_parity.py \
     tests/test_surreal_store.py tests/test_surreal_connector.py \
     tests/test_turbovec_retriever_unit.py tests/test_c1_over_vector_e2e.py \
     tests/test_surreal_chunksource_unit.py tests/test_store_backed_e2e.py \
+    tests/test_sql_safety_inline.py tests/test_sql_ast_gate.py tests/test_bq_cost_guard.py \
+    tests/test_bigquery_connector.py tests/test_warehouse_governance.py \
     tests/test_ci_dependency_guard.py 2>&1 | grep -c -E '^SKIPPED' || true)
 if [ "$SKIPS" -ne 0 ]; then
     echo "FAIL: $SKIPS headline test(s) skipped — false-green risk." >&2
