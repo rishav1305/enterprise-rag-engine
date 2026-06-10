@@ -122,6 +122,11 @@ class EngineConfig:
     rate_limit_per_min: int = field(
         default_factory=lambda: int(os.getenv("RAG_RATE_LIMIT_PER_MIN", "30"))
     )
+    # INSTANCE-WIDE per-min cap (total across ALL keys) — closes the X-User-Id-rotation
+    # bypass of the per-key cap. Default = 50x the per-key cap.
+    instance_rate_limit_per_min: int = field(
+        default_factory=lambda: int(os.getenv("RAG_INSTANCE_RATE_LIMIT_PER_MIN", "1500"))
+    )
     query_cap_per_day: int = field(
         default_factory=lambda: int(os.getenv("RAG_QUERY_CAP_PER_DAY", "500"))
     )
@@ -203,6 +208,11 @@ class EngineConfig:
         if self.query_cap_per_day < 1:
             raise ValueError(
                 f"query_cap_per_day must be >= 1, got {self.query_cap_per_day}"
+            )
+        if self.instance_rate_limit_per_min < 1:
+            raise ValueError(
+                f"instance_rate_limit_per_min must be >= 1, got "
+                f"{self.instance_rate_limit_per_min}"
             )
         if self.demo_profile not in ("synthetic", "production"):
             raise ValueError(

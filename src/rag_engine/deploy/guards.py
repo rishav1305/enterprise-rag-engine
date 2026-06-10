@@ -29,18 +29,32 @@ class RateLimiter:
     it records the request. Time is injectable for deterministic tests.
     """
 
-    def __init__(self, per_min: int, per_day: int, now=time.monotonic) -> None:
+    def __init__(self, per_min: int, per_day: int, now=time.monotonic,
+                 instance_per_min: int | None = None) -> None:
         if per_min < 1 or per_day < 1:
             raise ValueError("per_min and per_day must be >= 1")
         self.per_min = per_min
         self.per_day = per_day
+        # INSTANCE-WIDE cap (total req/min across ALL keys) — a client that rotates
+        # X-User-Id per request bypasses the per-key cap; the instance cap closes that.
+        # Defaults to a generous multiple of the per-key cap.
+        self.instance_per_min = instance_per_min if instance_per_min is not None \
+            else per_min * 50
         self._now = now
         self._window: dict[str, deque[float]] = defaultdict(deque)   # last-60s timestamps
         self._day_count: dict[str, int] = defaultdict(int)
         self._day_start: dict[str, float] = {}
+        self._instance_window: deque[float] = deque()   # ALL keys, last-60s
 
     def check(self, key: str) -> None:
         t = self._now()
+        # INSTANCE-WIDE per-minute cap FIRST (key-rotation can't bypass it).
+        iw = self._instance_window
+        while iw and (t - iw[0]) >= 60:
+            iw.popleft()
+        if len(iw) >= self.instance_per_min:
+            raise RateLimitExceeded(
+                f"instance rate limit ({self.instance_per_min}/min) exceeded")
         # per-day cap (rolling 24h window per key)
         start = self._day_start.get(key)
         if start is None or (t - start) >= 86400:
@@ -48,15 +62,16 @@ class RateLimiter:
             self._day_count[key] = 0
         if self._day_count[key] >= self.per_day:
             raise RateLimitExceeded(f"daily query cap ({self.per_day}) exceeded")
-        # per-minute sliding window
+        # per-minute sliding window (per key)
         w = self._window[key]
         while w and (t - w[0]) >= 60:
             w.popleft()
         if len(w) >= self.per_min:
             raise RateLimitExceeded(f"rate limit ({self.per_min}/min) exceeded")
-        # record
+        # record (both windows)
         w.append(t)
         self._day_count[key] += 1
+        iw.append(t)
 
 
 def assert_synthetic_only(config) -> None:

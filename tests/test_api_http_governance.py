@@ -20,24 +20,40 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-# leak signals from the class-F restricted exec-comp doc that ACTUALLY appear in a
-# cleared session's answer/citations (verified: a C_SUITE answer contains the title
-# text + the hr-exec-comp-2026 citation; an intern's does not). The dollar figure
-# alone isn't surfaced by the extractive generator, so we key on what really leaks.
+import json  # noqa: E402
+
+# leak signals from the class-F restricted exec-comp doc. The detector scans the
+# ENTIRE serialized response — so it catches the METADATA-DISCLOSURE class too: a
+# denied caller must learn NOTHING about restricted content — not its body, not its
+# doc id, not the roles/clearance that would unlock it (the trail-disclosure bug).
 RESTRICTED_TEXT = "Executive Compensation Schedule 2026"
 RESTRICTED_DOC = "hr-exec-comp-2026"
+ACL_MARKERS = ("hr-exec-comp-2026", "C_SUITE", "HR_ADMIN", "required L5",
+               "insufficient_clearance", "required_roles", "session L1")
 
 
 def _restricted_leaked(resp_json: dict) -> bool:
-    """True if the restricted doc's content OR citation appears in the response."""
-    if RESTRICTED_TEXT in (resp_json.get("answer") or ""):
+    """True if ANY restricted content OR ACL metadata appears ANYWHERE in the response.
+
+    Scans json.dumps(response) — covers answer, citations, AND any governance_trail/
+    ACL field, so the metadata-disclosure class (denied-doc id, required roles/
+    clearance) is caught, not just answer+citations.
+    """
+    blob = json.dumps(resp_json, default=str)
+    if RESTRICTED_TEXT in blob:
         return True
-    cited = {c.get("parent_doc_id") for c in resp_json.get("citations", [])}
-    return RESTRICTED_DOC in cited
+    return any(marker in blob for marker in ACL_MARKERS)
 
 
 @pytest.fixture(scope="module")
-def client():
+def client(request):
+    # high rate-limit so the shared client isn't self-throttled across many tests;
+    # the dedicated rate-limit test builds its own low-cap client.
+    import os
+    os.environ["RAG_RATE_LIMIT_PER_MIN"] = "100000"
+    os.environ["RAG_QUERY_CAP_PER_DAY"] = "1000000"
+    request.addfinalizer(lambda: (os.environ.pop("RAG_RATE_LIMIT_PER_MIN", None),
+                                  os.environ.pop("RAG_QUERY_CAP_PER_DAY", None)))
     from rag_engine.api import app
     with TestClient(app) as c:
         yield c
@@ -75,6 +91,49 @@ def test_cleared_session_can_retrieve(client):
     assert r.status_code == 200
     assert _restricted_leaked(r.json()), \
         "cleared C_SUITE should retrieve the restricted doc (proves the leak signal is real)"
+
+
+def test_denied_caller_gets_no_acl_metadata_trail(client):
+    """CRITICAL (the trail-disclosure bug): a denied INTERN's response must carry NO
+    operator-only ACL metadata — no governance_trail, no required_roles, no denied-doc
+    id, no required-clearance reason. Only a withheld COUNT.
+
+    BITES: leave the full governance_trail (with required_roles/denied ids) in the
+    client response -> the whole-response scan catches the ACL disclosure -> fails.
+    """
+    # a UNIQUE question so it's a cache MISS (a hit returns an empty trail -> the
+    # withheld COUNT would be lost; the security assertion holds either way, but we
+    # want the count populated to assert on it).
+    r = _ask(client, "exec compensation schedule detail metadata-disclosure probe",
+             roles="INTERN", clearance=1)
+    assert r.status_code == 200
+    j = r.json()
+    assert "governance_trail" not in j      # no operator-only field on the client model
+    assert not _restricted_leaked(j), "ACL metadata disclosed to a denied caller"
+    assert j.get("n_withheld", 0) >= 1      # client learns a COUNT (UI: "N withheld")
+
+
+def test_n_withheld_is_a_count_only(client):
+    r = _ask(client, "exec compensation withheld count probe unique query",
+             roles="INTERN", clearance=1)
+    j = r.json()
+    assert isinstance(j["n_withheld"], int) and j["n_withheld"] >= 1
+    # the client model exposes only the redacted field set — no ACL fields.
+    assert set(j.keys()) <= {"query", "answer", "architecture", "citations",
+                             "access_denied", "admitted", "n_withheld"}
+
+
+def test_clearance_out_of_range_is_4xx_not_500(client):
+    for bad in ("99", "-3", "6", "1000"):
+        r = client.post("/query", json={"question": "hi"}, headers={
+            "X-User-Id": "t", "X-User-Roles": "PUBLIC", "X-Clearance": bad})
+        assert r.status_code == 422, f"X-Clearance={bad} should be 4xx, got {r.status_code}"
+
+
+def test_clearance_non_int_is_4xx(client):
+    r = client.post("/query", json={"question": "hi"}, headers={
+        "X-User-Id": "t", "X-User-Roles": "PUBLIC", "X-Clearance": "notanumber"})
+    assert 400 <= r.status_code < 500
 
 
 def test_body_role_is_ignored_no_self_escalation(client):

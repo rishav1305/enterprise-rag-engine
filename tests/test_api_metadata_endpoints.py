@@ -15,7 +15,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-RESTRICTED = "$480,000"   # a restricted exec-comp value — must NOT appear anywhere
+import re
+
+# the structural key-set assertions carry the real weight (a row-content field would
+# change the key set); this currency/PII-shape scan is belt-and-suspenders: NO
+# dollar-amount-shaped value should appear in a metadata endpoint (those are row data).
+RESTRICTED = "$480,000"          # one known restricted literal (kept for clarity)
+_CURRENCY = re.compile(r"\$\s?\d[\d,]{3,}")   # $1,234+ shaped -> row-data smell
+
+
+def _no_currency_values(text: str) -> bool:
+    return _CURRENCY.search(text) is None
 
 
 @pytest.fixture(scope="module")
@@ -53,14 +63,25 @@ def test_glossary_exposes_mapping_only_not_row_data(client):
 def test_funnel_is_scale_metadata_only(client):
     r = client.get("/funnel")
     assert r.status_code == 200
-    # funnel is a list of stage rows (scale/count metadata) — never row content.
-    assert isinstance(r.json()["funnel"], list)
+    funnel = r.json()["funnel"]
+    assert isinstance(funnel, list) and funnel, "funnel should return stage rows"
+    # STRUCTURAL key-set assertion: each stage row carries ONLY scale/collapse metadata
+    # fields — an injected row-content field changes the key set and BITES (the prior
+    # isinstance-only test was hollow).
+    allowed = {"stage", "count", "bytes", "note", "provenance_url"}
+    for row in funnel:
+        assert set(row.keys()) <= allowed, f"unexpected funnel field(s): {set(row) - allowed}"
+    # the funnel shows the PB-tail scale collapse -> the top-k reaching the model.
+    assert any("pb_tail" in (row.get("stage") or "") for row in funnel)
+    assert any(row.get("stage") == "final_top_k" for row in funnel)
     assert RESTRICTED not in r.text
 
 
 def test_metadata_endpoints_need_no_auth_but_leak_nothing(client):
-    # these are public (no headers) — and still carry no restricted content.
+    # these are public (no headers) — and still carry no restricted content and NO
+    # currency/row-data-shaped value (the structural smell, not just one literal).
     for path in ("/personas", "/glossary", "/funnel"):
         r = client.get(path)
         assert r.status_code == 200
         assert RESTRICTED not in r.text
+        assert _no_currency_values(r.text), f"{path} exposes a currency-shaped value"

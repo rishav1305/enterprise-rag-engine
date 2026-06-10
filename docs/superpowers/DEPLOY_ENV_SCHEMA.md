@@ -12,7 +12,10 @@ The Gate A endpoint inventory + which config is a SECRET (server-only) vs public
 | `VOYAGE_API_KEY` | **YES** | live embeddings | unset (HashingEmbedder) |
 | `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` | **YES** | trace export | unset (in-mem tracer) |
 | `RAG_DEMO_PROFILE` | no | `synthetic` (refuse-to-start if a non-synthetic source is set) | `synthetic` |
-| `RAG_RATE_LIMIT_PER_MIN` / `RAG_QUERY_CAP_PER_DAY` | no | abuse caps (B-cap) | set in prod |
+| `RAG_RATE_LIMIT_PER_MIN` / `RAG_QUERY_CAP_PER_DAY` | no | per-KEY abuse caps (B-cap) | set in prod |
+| `RAG_INSTANCE_RATE_LIMIT_PER_MIN` | no | INSTANCE-WIDE cap (closes X-User-Id rotation bypass of the per-key cap) | set in prod |
+
+> **Edge note:** the per-key cap is bypassable by rotating `X-User-Id`; the instance-wide cap closes that at the app. For the PUBLIC demo URL, ALSO front it with **Cloudflare edge rate-limiting** (per-IP) — the synthetic profile already removes the run-up-bills risk (offline extractive generator, no live LLM creds), so the residual is compute-DoS, which edge rate-limiting handles best.
 
 ## Frontend (Next.js, portfolio_app — public bundle)
 ZERO credentials. NO `NEXT_PUBLIC_*` secret. Only `NEXT_PUBLIC_API_BASE_URL` (the public

@@ -64,9 +64,31 @@ def test_per_day_cap_enforced():
 
 
 def test_keys_are_independent():
-    rl = RateLimiter(per_min=1, per_day=1000, now=_Clock())
+    rl = RateLimiter(per_min=1, per_day=1000, now=_Clock(), instance_per_min=1000)
     rl.check("a")
     rl.check("b")                  # a different key has its own budget
+
+
+def test_instance_cap_blocks_key_rotation_bypass():
+    # a client ROTATES the key per request to evade the per-key cap -> the INSTANCE-
+    # WIDE cap must still trip. per-key high (10), instance cap low (3).
+    rl = RateLimiter(per_min=10, per_day=10000, now=_Clock(), instance_per_min=3)
+    rl.check("k0")
+    rl.check("k1")
+    rl.check("k2")                 # 3 distinct keys, each under its per-key cap
+    with pytest.raises(RateLimitExceeded, match="instance"):
+        rl.check("k3")            # 4th request (new key) -> instance cap trips
+
+
+def test_instance_cap_window_slides():
+    clk = _Clock()
+    rl = RateLimiter(per_min=100, per_day=10000, now=clk, instance_per_min=2)
+    rl.check("a")
+    rl.check("b")
+    with pytest.raises(RateLimitExceeded, match="instance"):
+        rl.check("c")
+    clk.advance(61)
+    rl.check("d")                  # window passed -> allowed
 
 
 # ---- synthetic-only refuse-to-start ------------------------------------
