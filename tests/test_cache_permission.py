@@ -84,3 +84,26 @@ def test_regovern_redacts_when_now_unauthorized():
     # the requester is in-scope for the KEY, but governance now denies the content
     deny_all = lambda ids, session: []  # noqa: E731
     assert c.get("what is exec compensation", s, deny_all) is None
+
+
+def test_partial_denial_is_fail_closed_miss():
+    """The opaque stored ANSWER was synthesized from the FULL chunk set. On PARTIAL
+    re-govern denial we cannot re-mask the answer, so we must MISS — never serve the
+    verbatim answer with merely-trimmed chunk_ids. This is the reproduced leak.
+
+    BITES: if get() reverts to serving a trimmed hit, the denied chunk's content
+    ($4.2M) is served verbatim and this assertion fails.
+    """
+    c = _cache()
+    s = Session(user_id="a", roles=["FINANCE"], clearance_level=3)
+    # answer was synthesized from BOTH the public chunk AND the secret one
+    c.put("summarize the comp memo", s,
+          chunk_ids=["pub:1", "secret:2"],
+          answer="Public summary. Bob's package is $4.2M (secret).")
+
+    # governance now denies only the secret chunk (partial denial)
+    def deny_secret(chunk_ids, session):
+        return [cid for cid in chunk_ids if cid != "secret:2"]
+
+    hit = c.get("summarize the comp memo", s, deny_secret)
+    assert hit is None, "PARTIAL-REDACTION LEAK: served the answer despite a denial"

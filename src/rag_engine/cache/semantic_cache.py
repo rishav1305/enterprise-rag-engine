@@ -21,16 +21,20 @@ swap for Voyage behind the same ABC, creds-gated, in production).
 
 from __future__ import annotations
 
+import logging
 import time
 from collections import OrderedDict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 
 from ..retrieval.base import Embedder
 from ..schemas import Session
 from .key import AuthScope
+
+_log = logging.getLogger(__name__)
 
 # govern_fn: given the stored chunk ids + the requesting session, return the ids
 # the session may retrieve NOW (governance re-applied). The cache never trusts the
@@ -71,11 +75,15 @@ class SemanticCache:
         similarity_threshold: float,
         ttl_seconds: float,
         max_entries: int,
+        audit_sink: Any | None = None,
     ) -> None:
         self.embedder = embedder
         self.similarity_threshold = similarity_threshold
         self.ttl_seconds = ttl_seconds
         self.max_entries = max_entries
+        # audit_sink (optional): on every cache HIT, an attributable `cache_hit`
+        # event is recorded (TRANSPARENT — a hit is never an unaudited answer).
+        self.audit_sink = audit_sink
         # insertion-ordered for LRU eviction; key -> _Entry. The map is GLOBAL but
         # lookups filter by scope_fp, so scopes are isolated within one store.
         self._entries: "OrderedDict[str, _Entry]" = OrderedDict()
@@ -112,12 +120,25 @@ class SemanticCache:
             return None
 
         entry = self._entries[best_key]
-        # RE-GOVERN ON HIT — re-derive what this session may see NOW.
-        authorized = govern_fn(entry.chunk_ids, session)
-        if not authorized:
-            return None  # fail-closed: nothing survives re-governance -> miss
+        # RE-GOVERN ON HIT — re-derive what this session may see NOW. A govern_fn
+        # that RAISES is treated as denial (fail-closed): never serve on an
+        # indeterminate governance outcome.
+        try:
+            authorized = govern_fn(entry.chunk_ids, session)
+        except Exception:
+            return None
+        # MISS-ON-ANY-REDACTION (fail-closed): the stored ANSWER is opaque and was
+        # synthesized from the FULL chunk set; we cannot safely re-mask it. So if
+        # re-governance changed the authorized set AT ALL (any chunk now denied —
+        # not just all of them), MISS and let the pipeline regenerate fresh from the
+        # authorized subset. Serving the verbatim answer with merely-trimmed
+        # chunk_ids would leak the denied chunk's content. (all-denied is the
+        # set-inequality's degenerate case, also a miss.)
+        if set(authorized) != set(entry.chunk_ids):
+            return None
 
         self._entries.move_to_end(best_key)  # LRU touch
+        self._audit_hit(session, scope_fp, best_sim, len(authorized))
         return CachedResult(
             answer=entry.answer,
             chunk_ids=list(authorized),
@@ -125,6 +146,24 @@ class SemanticCache:
             scope_fp=scope_fp,
             regoverned=True,
         )
+
+    def _audit_hit(self, session: Session, scope_fp: str, sim: float, n: int) -> None:
+        """Record an attributable, metric-only cache_hit event (TRANSPARENT).
+
+        RESILIENT: the audit sink is a SIDE CHANNEL — its failure must not crash a
+        cache hit. Carries user_id for attribution + the metric attrs; NO chunk text
+        or answer (no-PII contract).
+        """
+        if self.audit_sink is None:
+            return
+        from .observability import cache_hit_attributes
+
+        detail = {"user_id": session.user_id, **cache_hit_attributes(sim, scope_fp, n)}
+        try:
+            self.audit_sink.record_event("cache_hit", detail)
+        except Exception:
+            _log.exception("cache_hit audit write failed (user=%s) — hit still served",
+                           session.user_id)
 
     def put(
         self,

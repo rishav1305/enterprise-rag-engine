@@ -18,6 +18,7 @@ are invalidated by deleting rows whose ``embedder_version`` no longer matches �
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from collections.abc import Sequence
@@ -29,6 +30,8 @@ from ..schemas import Session
 from .key import AuthScope
 from .semantic_cache import CachedResult, GovernFn
 
+_log = logging.getLogger(__name__)
+
 
 class SurrealCacheStore:
     def __init__(
@@ -38,12 +41,14 @@ class SurrealCacheStore:
         similarity_threshold: float,
         ttl_seconds: float,
         embedder_version: str = "hashing-v1",
+        audit_sink=None,
     ) -> None:
         self.store = store
         self.embedder = embedder
         self.similarity_threshold = similarity_threshold
         self.ttl_seconds = ttl_seconds
         self.embedder_version = embedder_version
+        self.audit_sink = audit_sink
 
     def _embed(self, query: str) -> np.ndarray:
         return self.embedder.embed([query])[0]
@@ -94,13 +99,36 @@ class SurrealCacheStore:
         if best is None or best_sim < self.similarity_threshold:
             return None
 
-        authorized = govern_fn(best["chunk_ids"], session)
-        if not authorized:
-            return None  # fail-closed re-govern miss
+        # RE-GOVERN ON HIT — govern_fn raising is treated as denial (fail-closed).
+        try:
+            authorized = govern_fn(best["chunk_ids"], session)
+        except Exception:
+            return None
+        # MISS-ON-ANY-REDACTION (fail-closed): same contract as the in-memory
+        # engine — the opaque stored answer was synthesized from the full chunk set,
+        # so ANY re-govern change (partial denial included) is a miss. Serving the
+        # verbatim answer with trimmed chunk_ids would leak the denied content.
+        if set(authorized) != set(best["chunk_ids"]):
+            return None
+        self._audit_hit(session, scope_fp, best_sim, len(authorized))
         return CachedResult(
             answer=best["answer"], chunk_ids=list(authorized),
             similarity=best_sim, scope_fp=scope_fp, regoverned=True,
         )
+
+    def _audit_hit(self, session: Session, scope_fp: str, sim: float, n: int) -> None:
+        """Attributable, metric-only cache_hit event (TRANSPARENT). RESILIENT: the
+        sink is a side channel — its failure must not crash a cache hit."""
+        if self.audit_sink is None:
+            return
+        from .observability import cache_hit_attributes
+
+        detail = {"user_id": session.user_id, **cache_hit_attributes(sim, scope_fp, n)}
+        try:
+            self.audit_sink.record_event("cache_hit", detail)
+        except Exception:
+            _log.exception("cache_hit audit write failed (user=%s) — hit still served",
+                           session.user_id)
 
     def invalidate_version(self, stale_version: str) -> None:
         """CDC seam (P0.9): drop entries embedded with a now-stale embedder version."""

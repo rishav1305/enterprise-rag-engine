@@ -72,3 +72,40 @@ def test_durable_invalidate_version_clears_stale(surreal_local):
     c.put("what is Q3 revenue", s, chunk_ids=["c1"], answer="42")
     c.invalidate_version("hashing-v1")          # the version we wrote under (CDC seam)
     assert c.get("what is Q3 revenue", s, _id) is None  # invalidated -> miss
+
+
+def test_durable_partial_denial_is_miss(surreal_local):
+    from rag_engine.schemas import Session
+    c = _cache(_store(surreal_local))
+    s = Session(user_id="a", roles=["FINANCE"], clearance_level=3)
+    c.put("summarize the memo", s, chunk_ids=["pub:1", "secret:2"], answer="...$4.2M...")
+    deny_secret = lambda ids, session: [i for i in ids if i != "secret:2"]  # noqa: E731
+    # partial denial -> miss (opaque answer can't be re-masked) — same as in-memory
+    assert c.get("summarize the memo", s, deny_secret) is None
+
+
+def test_durable_govern_fn_raises_is_fail_closed(surreal_local):
+    from rag_engine.schemas import Session
+    c = _cache(_store(surreal_local))
+    s = Session(user_id="a", roles=["FINANCE"], clearance_level=3)
+    c.put("what is Q3 revenue", s, chunk_ids=["c1"], answer="42")
+
+    def boom(ids, session):
+        raise RuntimeError("governance down")
+
+    assert c.get("what is Q3 revenue", s, boom) is None
+
+
+def test_durable_embedder_version_mismatch_is_miss(surreal_local):
+    from rag_engine.cache.surreal_cache import SurrealCacheStore
+    from rag_engine.retrieval.embedders import HashingEmbedder
+    from rag_engine.schemas import Session
+    st = _store(surreal_local)
+    s = Session(user_id="a", roles=["FINANCE"], clearance_level=3)
+    # write under v1
+    SurrealCacheStore(st, HashingEmbedder(dim=128), 0.9, 3600,
+                      embedder_version="v1").put("q one two", s, chunk_ids=["c1"], answer="42")
+    # read under v2 -> the WHERE embedder_version filter excludes the v1 row -> miss
+    reader = SurrealCacheStore(st, HashingEmbedder(dim=128), 0.9, 3600,
+                               embedder_version="v2")
+    assert reader.get("q one two", s, _id) is None

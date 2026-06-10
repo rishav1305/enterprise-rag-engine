@@ -54,3 +54,21 @@ def test_fingerprint_is_stable_hex():
 def test_scope_is_hashable_and_frozen():
     scope = AuthScope.from_session(Session(user_id="a", roles=["FINANCE"], clearance_level=3))
     {scope: 1}  # hashable -> usable as a dict/index key
+
+
+def test_control_char_role_is_rejected():
+    # the fingerprint joins roles with \x1f; a role literally containing a control
+    # char could alias two scopes -> the Session validator must refuse it.
+    import pytest
+    with pytest.raises(ValueError):
+        Session(user_id="a", roles=["FIN\x1fANCE"], clearance_level=3)
+
+
+def test_control_char_aliasing_is_blocked_endtoend():
+    # ['A\x1fB'] must NOT be allowed (which would fingerprint-collide with ['A','B']).
+    import pytest
+    with pytest.raises(ValueError):
+        Session(user_id="a", roles=["A\x1fB"], clearance_level=3)
+    # the legitimate two-role scope is fine and distinct
+    two = AuthScope.from_session(Session(user_id="b", roles=["A", "B"], clearance_level=3))
+    assert isinstance(two.fingerprint(), str)
