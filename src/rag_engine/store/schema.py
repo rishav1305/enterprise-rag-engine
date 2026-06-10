@@ -22,6 +22,10 @@ def ddl_statements(vector_dim: int = VECTOR_DIM) -> list[str]:
         "DEFINE TABLE OVERWRITE contract SCHEMALESS;",
         "DEFINE TABLE OVERWRITE component SCHEMALESS;",
         "DEFINE TABLE OVERWRITE ticket SCHEMALESS;",
+        # Graph edge between chunks (P0.6 graph mode). A directed `links` edge so
+        # traversal (`chunk:a->links->chunk:b`) resolves to chunk ids — the same
+        # governance currency the allowlist pre-filter is keyed on.
+        "DEFINE TABLE OVERWRITE links SCHEMALESS TYPE RELATION FROM chunk TO chunk;",
         "DEFINE ANALYZER OVERWRITE meridian_text TOKENIZERS blank,class FILTERS lowercase;",
         (
             f"DEFINE INDEX OVERWRITE chunk_vec ON chunk FIELDS vec "
@@ -29,6 +33,12 @@ def ddl_statements(vector_dim: int = VECTOR_DIM) -> list[str]:
         ),
         (
             "DEFINE INDEX OVERWRITE ticket_ft ON ticket FIELDS summary "
+            "FULLTEXT ANALYZER meridian_text BM25;"
+        ),
+        # Full-text over chunk text (P0.6 lexical mode). Lexical hits resolve to
+        # chunk ids so the same allowlist pre-filter applies (drop-before-search).
+        (
+            "DEFINE INDEX OVERWRITE chunk_ft ON chunk FIELDS text "
             "FULLTEXT ANALYZER meridian_text BM25;"
         ),
     ]

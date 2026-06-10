@@ -50,11 +50,11 @@ PY
 #    -W error on unexpected skips is enforced by the in-suite no-skip guards
 #    (tests/test_ci_dependency_guard.py fails-not-skips in RAG_DEV_ENV=1).
 echo "== pytest -m 'not cloud' =="
-PYTHONPATH=src "$PYTHON" -m pytest -m "not cloud and not bq and not llm and not langfuse" -rs
+PYTHONPATH=src "$PYTHON" -m pytest -m "not cloud and not bq and not llm and not langfuse and not spicedb and not oso" -rs
 
 # 5) belt-and-suspenders: assert ZERO skips among the headline test modules
 echo "== no-skip assertion (headline governance/turbovec/SurrealDB tests) =="
-SKIPS=$(PYTHONPATH=src "$PYTHON" -m pytest -m "not cloud and not bq and not llm and not langfuse" -rs -q \
+SKIPS=$(PYTHONPATH=src "$PYTHON" -m pytest -m "not cloud and not bq and not llm and not langfuse and not spicedb and not oso" -rs -q \
     tests/test_turbovec_index.py tests/test_allowlist_prefilter.py \
     tests/test_turbovec_recall.py tests/test_oracle_parity.py \
     tests/test_surreal_store.py tests/test_surreal_connector.py \
@@ -70,6 +70,9 @@ SKIPS=$(PYTHONPATH=src "$PYTHON" -m pytest -m "not cloud and not bq and not llm 
     tests/test_catalog_scale_provenance.py tests/test_funnel.py \
     tests/test_observability.py tests/test_audit_sink.py \
     tests/test_audit_sink_surreal.py \
+    tests/test_allowlist_backend.py tests/test_graph_prefilter.py \
+    tests/test_structured_prefilter.py tests/test_lexical_prefilter.py \
+    tests/test_store_mode_queries.py tests/test_rebac_parity.py \
     tests/test_ci_dependency_guard.py 2>&1 | grep -c -E '^SKIPPED' || true)
 if [ "$SKIPS" -ne 0 ]; then
     echo "FAIL: $SKIPS headline test(s) skipped — false-green risk." >&2
