@@ -37,24 +37,24 @@ echo "surreal: $(command -v surreal) ($(surreal version 2>/dev/null | head -1))"
 # 3) assert the pinned dev deps are importable (don't let a missing dep skip)
 "$PYTHON" - <<'PY'
 import importlib.util, sys
-missing = [m for m in ("turbovec", "surrealdb", "faker", "polars", "numpy", "pydantic", "sqlglot", "semantic_router")
+missing = [m for m in ("turbovec", "surrealdb", "faker", "polars", "numpy", "pydantic", "sqlglot", "semantic_router", "opentelemetry")
            if importlib.util.find_spec(m) is None]
 if missing:
     sys.exit(f"FAIL: dev deps missing: {missing}. Run `make dev`.")
 import turbovec
 assert getattr(turbovec, "__version__", "0.7.0")  # pinned ==0.7.0
-print("dev deps OK (turbovec, surrealdb, faker, polars, numpy, pydantic, sqlglot, semantic_router)")
+print("dev deps OK (turbovec, surrealdb, faker, polars, numpy, pydantic, sqlglot, semantic_router, opentelemetry)")
 PY
 
 # 4) run the suite (cloud excluded — creds-gated, non-authoritative for the gate)
 #    -W error on unexpected skips is enforced by the in-suite no-skip guards
 #    (tests/test_ci_dependency_guard.py fails-not-skips in RAG_DEV_ENV=1).
 echo "== pytest -m 'not cloud' =="
-PYTHONPATH=src "$PYTHON" -m pytest -m "not cloud and not bq and not llm" -rs
+PYTHONPATH=src "$PYTHON" -m pytest -m "not cloud and not bq and not llm and not langfuse" -rs
 
 # 5) belt-and-suspenders: assert ZERO skips among the headline test modules
 echo "== no-skip assertion (headline governance/turbovec/SurrealDB tests) =="
-SKIPS=$(PYTHONPATH=src "$PYTHON" -m pytest -m "not cloud and not bq and not llm" -rs -q \
+SKIPS=$(PYTHONPATH=src "$PYTHON" -m pytest -m "not cloud and not bq and not llm and not langfuse" -rs -q \
     tests/test_turbovec_index.py tests/test_allowlist_prefilter.py \
     tests/test_turbovec_recall.py tests/test_oracle_parity.py \
     tests/test_surreal_store.py tests/test_surreal_connector.py \
@@ -67,6 +67,9 @@ SKIPS=$(PYTHONPATH=src "$PYTHON" -m pytest -m "not cloud and not bq and not llm"
     tests/test_glossary_inline.py tests/test_glossary_profiler.py \
     tests/test_view_miner.py tests/test_glossary_drift.py \
     tests/test_glossary_to_sql_e2e.py tests/test_glossary_surreal_store.py \
+    tests/test_catalog_scale_provenance.py tests/test_funnel.py \
+    tests/test_observability.py tests/test_audit_sink.py \
+    tests/test_audit_sink_surreal.py \
     tests/test_ci_dependency_guard.py 2>&1 | grep -c -E '^SKIPPED' || true)
 if [ "$SKIPS" -ne 0 ]; then
     echo "FAIL: $SKIPS headline test(s) skipped — false-green risk." >&2

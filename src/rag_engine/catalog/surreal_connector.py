@@ -41,6 +41,9 @@ class SurrealConnector(Connector):
                     column_policy_for(c["name"], c["pii"], c["masked"])
                     for c in row.get("columns", [])
                 ),
+                scale_badge=row.get("scale_badge", ""),
+                provenance_url=row.get("provenance_url", ""),
+                row_count=row.get("row_count", 0),
             )
 
 

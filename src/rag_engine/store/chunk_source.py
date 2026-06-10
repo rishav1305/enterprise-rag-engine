@@ -60,8 +60,31 @@ def _security(cls: str, level: int) -> SecurityContext:
 
 
 class SurrealChunkSource:
-    def __init__(self, store) -> None:
+    def __init__(self, store, audit_sink=None) -> None:
         self.store = store
+        # P0.5: a durable AuditSink makes malformed-row drops queryable, not just
+        # logged. Optional (in-memory or SurrealAuditSink); None -> log only.
+        self.audit_sink = audit_sink
+
+    def _audit_drop(self, where: str, chunk_id, cls) -> None:
+        # RESILIENT: the audit sink is a SIDE CHANNEL — its failure (e.g. a
+        # SurrealDB outage) must NOT crash the retrieval request. The `_log.warning`
+        # drop line already fired before this is called, so a sink failure is logged
+        # (via _log.exception) and swallowed here, never re-raised. Fail-open on the
+        # AUDIT write only; the governance drop itself already happened (fail-closed).
+        if self.audit_sink is None:
+            return
+        try:
+            self.audit_sink.record_event(
+                "malformed_chunk_dropped",
+                {"where": where, "chunk_id": str(chunk_id), "cls": cls},
+            )
+        except Exception:
+            _log.exception(
+                "audit sink write failed for malformed-chunk drop (chunk=%s, where=%s) "
+                "— retrieval continues; the drop is still logged above",
+                chunk_id, where,
+            )
 
     def get_chunk(self, chunk_id: str) -> EnrichedChunk | None:
         row = self.store.get_chunk_row(chunk_id)
@@ -77,6 +100,7 @@ class SurrealChunkSource:
                 "chunk %s dropped: unknown/missing sensitivity class %r (fail-closed)",
                 chunk_id, row.get("cls"),
             )
+            self._audit_drop("get_chunk", chunk_id, row.get("cls"))
             return None
         cid = _bare_id(row.get("id", chunk_id))
         return EnrichedChunk(
@@ -105,6 +129,7 @@ class SurrealChunkSource:
                     "chunk %s excluded from allowlist: unknown/missing class %r (fail-closed)",
                     row.get("id"), row.get("cls"),
                 )
+                self._audit_drop("all_chunk_security", row.get("id"), row.get("cls"))
                 continue
             out.append(
                 EnrichedChunk(

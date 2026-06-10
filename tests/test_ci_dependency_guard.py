@@ -126,3 +126,18 @@ def test_semantic_router_is_importable_in_dev_env():
     assert _semantic_router_installed()
     from rag_engine.routing.semantic_router import SemanticRouter  # noqa: F401
     from rag_engine.texttosql.agent import TextToSqlAgent  # noqa: F401
+
+
+def _otel_installed() -> bool:
+    return importlib.util.find_spec("opentelemetry") is not None
+
+
+def test_opentelemetry_is_importable_in_dev_env():
+    """OTel powers the P0.5 tracer. In a dev env it MUST be present (the tracer
+    works without it too, but CI should run the OTel-emitting path)."""
+    dev_env = os.getenv("RAG_DEV_ENV") == "1"
+    if not dev_env and not _otel_installed():
+        pytest.skip("runtime-only env (set RAG_DEV_ENV=1 in CI to enforce)")
+    import opentelemetry  # noqa: F401
+    from rag_engine.observability.tracer import Tracer  # noqa: F401
+    assert _otel_installed()
