@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from rag_engine.funnel.trace import FunnelTrace  # noqa: E402
 from rag_engine.observability.tracer import InMemorySpanCollector, Tracer  # noqa: E402
-from rag_engine.selfrag.grader import FakeGrader, GroundednessGrade, RelevanceGrade  # noqa: E402
+from rag_engine.selfrag.grader import FakeGrader, RelevanceGrade  # noqa: E402
 from rag_engine.selfrag.loop import CorrectiveLoop  # noqa: E402
 from rag_engine.schemas import EnrichedChunk, ScoredChunk, SecurityContext, Session  # noqa: E402
 

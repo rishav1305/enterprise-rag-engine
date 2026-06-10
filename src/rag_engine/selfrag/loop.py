@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..schemas import ScoredChunk, Session
-from .grader import Grader, GroundednessGrade, RelevanceGrade
+from .grader import Grader
 
 # Injected, session-scoped retrieval. The loop passes (reformulated_query, SESSION);
 # the session is fixed for the whole run — the loop cannot change it.
