@@ -114,3 +114,12 @@ def test_unresolvable_projection_fails_closed():
     out = mask_rows([{"mystery": "could-be-sensitive"}], (_PII,),
                     mask=True, projections=p)
     assert out[0]["mystery"] == "[REDACTED]"   # never assume safe
+
+
+def test_masked_cell_non_string_value_redacted():
+    # a masked cell holding a non-string (None, dict, number) is still redacted to
+    # the token — mask_value replaces the value regardless of type (no AttributeError).
+    for val in (None, {"nested": "x"}, 12345, [1, 2]):
+        out = mask_rows([{"customer_email": val}], (_PII,), mask=True)
+        assert out[0]["customer_email"] == "[REDACTED]"
+        assert str(val) not in str(out) or val is None

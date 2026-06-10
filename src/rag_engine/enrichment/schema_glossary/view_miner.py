@@ -14,10 +14,16 @@ import sqlglot
 from sqlglot import exp
 
 
-def _from_table(select: exp.Select) -> str | None:
-    # the single source table of the SELECT (mining is scoped to single-table views)
-    tbl = select.find(exp.Table)
-    return tbl.name if tbl is not None else None
+def _single_source_table(select: exp.Select) -> str | None:
+    """Return the SINGLE source table, or None for 0 or multiple tables.
+
+    Mining is scoped to single-table views: a JOIN/multi-table SELECT would let us
+    misattribute a column to the wrong table (e.g. `SELECT t.text_2, u.text_2 ...`),
+    so we REFUSE to mine it rather than guess. Distinct table NAMES (handles
+    self-joins/aliases conservatively by name count).
+    """
+    tables = {t.name for t in select.find_all(exp.Table)}
+    return next(iter(tables)) if len(tables) == 1 else None
 
 
 def mine_views(views: Mapping[str, str], dialect: str = "bigquery") -> dict[tuple[str, str], str]:
@@ -35,7 +41,7 @@ def mine_views(views: Mapping[str, str], dialect: str = "bigquery") -> dict[tupl
         select = tree if isinstance(tree, exp.Select) else tree.find(exp.Select)
         if select is None:
             continue
-        table = _from_table(select)
+        table = _single_source_table(select)
         if table is None:
             continue
         for proj in select.expressions:

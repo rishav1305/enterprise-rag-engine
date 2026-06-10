@@ -61,3 +61,11 @@ def test_profile_table_covers_all_columns():
 def test_high_cardinality_id_distinct_ratio_one():
     rows = [{"text_1": f"id-{i}"} for i in range(100)]
     assert profile_column(rows, "tbl_44", "text_1").distinct_ratio == 1.0
+
+
+def test_uuid_column_classified():
+    import uuid
+    rows = [{"text_1": str(uuid.UUID(int=i))} for i in range(1, 25)]
+    p = profile_column(rows, "tbl_44", "text_1")
+    assert p.regex_class == "uuid"
+    assert p.distinct_ratio == 1.0

@@ -16,7 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
-from rag_engine.catalog.asset import ColumnPolicy  # noqa: E402
+from rag_engine.catalog.connector import SeedConnector  # noqa: E402
+from rag_engine.catalog.registry import CatalogRegistry  # noqa: E402
 from rag_engine.connectors.bigquery import FakeBigQueryClient, GuardedBigQuery  # noqa: E402
 from rag_engine.enrichment.schema_glossary.drafter import FakeGlossaryDrafter, build_glossary  # noqa: E402
 from rag_engine.enrichment.schema_glossary.profiler import profile_table  # noqa: E402
@@ -27,6 +28,14 @@ from rag_engine.texttosql.agent import TextToSqlAgent  # noqa: E402
 from seeds.synthetic.legacy_mart import LEGACY_VIEWS  # noqa: E402
 
 _VICTIM = "Jane Doe"
+
+
+def _catalog_columns(asset_id: str):
+    """ColumnPolicy tuple for an asset, from the SEEDED catalog (single source of
+    truth — so the per-table-masking assertion tracks the estate, not an inline dup)."""
+    reg = CatalogRegistry()
+    reg.load(SeedConnector(scale=0.01))
+    return reg.get(asset_id).columns
 
 
 def _glossary():
@@ -52,23 +61,21 @@ def test_glossary_drives_correct_sql_over_opaque_schema():
     gen = FakeSqlGenerator({"customer names": sql})
     fake_bq = FakeBigQueryClient(dry_run_bytes=10, rows=[{"text_2": _VICTIM}])
     g = GuardedBigQuery(fake_bq, "text_1", 1_000_000_000)
-    # tbl_44.text_2 is masked (full_name, PII) per the catalog per-table policy
-    agent = TextToSqlAgent(
-        gen, g,
-        column_policies=(ColumnPolicy(name="text_2", pii=True, masked=True,
-                                      mask_reason="PII_MASK"),),
-    )
+    # tbl_44.text_2 masking comes from the SEEDED catalog per-table policy (single
+    # source) — so flipping the seed's masked flag flips this assertion too.
+    agent = TextToSqlAgent(gen, g, column_policies=_catalog_columns("legacy_mart_tbl_44"))
     res = agent.answer("customer names", mask=True)
     assert _VICTIM not in res.answer and _VICTIM not in str(res.rows)
     assert res.rows[0]["text_2"] == "[REDACTED]"
 
 
 def test_per_table_text2_not_masked_for_orders():
-    # tbl_71.text_2 (order_status) is NOT PII -> not masked (per-table semantics)
+    # tbl_71.text_2 (order_status) is NOT PII -> not masked (per-table semantics),
+    # sourced from the seeded catalog's tbl_71 ColumnPolicy (text_2 unmasked there).
     gen = FakeSqlGenerator({"order statuses": "SELECT text_2 FROM tbl_71 WHERE text_1 >= 'o0'"})
     fake_bq = FakeBigQueryClient(dry_run_bytes=10, rows=[{"text_2": "shipped"}])
     g = GuardedBigQuery(fake_bq, "text_1", 1_000_000_000)
-    agent = TextToSqlAgent(gen, g, column_policies=())   # no masked columns for orders
+    agent = TextToSqlAgent(gen, g, column_policies=_catalog_columns("legacy_mart_tbl_71"))
     res = agent.answer("order statuses", mask=True)
     assert res.rows[0]["text_2"] == "shipped"            # raw status, correctly NOT masked
 
