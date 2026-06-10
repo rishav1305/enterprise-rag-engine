@@ -57,6 +57,27 @@ def test_injection_refused_before_execute():
     assert not fake.executed
 
 
+def test_select_into_refused_execute_never_called():
+    # CRITICAL regression: SELECT...INTO (CTAS-in-disguise) must be REFUSED before
+    # execute, and must NOT be transpiled+shipped as a CREATE TABLE write.
+    fake = FakeBigQueryClient(dry_run_bytes=1)
+    g = GuardedBigQuery(fake, _PART, _CAP)
+    with pytest.raises(AstGateError):
+        g.run(f"SELECT a INTO exfil_table FROM trips WHERE {_PART} >= '2024-01-01'")
+    assert not fake.executed
+    assert not fake.dry_run_targets   # never even estimated (refused at the AST gate)
+
+
+def test_dry_run_target_equals_execute_target():
+    # IMPORTANT regression: the cap is checked against the SAME string that runs
+    # (transpile FIRST, then dry-run AND execute the transpiled SQL).
+    fake = FakeBigQueryClient(dry_run_bytes=10)
+    g = GuardedBigQuery(fake, _PART, _CAP)
+    g.run(f"SELECT a FROM trips WHERE {_PART} >= '2024-01-01'")
+    assert fake.dry_run_targets and fake.executed
+    assert fake.dry_run_targets[-1] == fake.executed[-1]   # same string
+
+
 def test_from_config_uses_config_cap_and_partition_flag(monkeypatch):
     monkeypatch.setenv("BQ_MAX_BYTES_BILLED", "1000")
     from rag_engine.config import EngineConfig

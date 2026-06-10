@@ -35,7 +35,19 @@ _REFUSED = [
     "TRUNCATE TABLE t",                                  # Command/DDL
     "GRANT SELECT ON t TO 'x'",                          # Command
     "not valid sql ;;;",                                 # unparseable
+    # SELECT ... INTO is a DDL WRITE in disguise (transpiles to CREATE TABLE AS):
+    "SELECT a INTO exfil_table FROM t WHERE d >= '2024-01-01'",
+    "select * into exfil from t where d >= '2024-01-01'",   # lowercase
+    "SELECT a, b INTO new_t FROM t",                         # no WHERE
+    "WITH x AS (SELECT a FROM t) SELECT a INTO y FROM x",    # INTO inside a CTE chain
 ]
+
+
+def test_select_into_does_not_transpile_to_ddl():
+    # regression guard for the CRITICAL bypass: SELECT...INTO must be refused at
+    # the gate, never reaching transpile (which would emit CREATE TABLE AS).
+    with pytest.raises(AstGateError):
+        assert_read_only("SELECT a INTO exfil FROM t WHERE d >= '2024-01-01'")
 
 
 @pytest.mark.parametrize("sql", _ALLOWED)

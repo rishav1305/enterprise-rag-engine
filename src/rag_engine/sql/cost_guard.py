@@ -33,6 +33,12 @@ def assert_partition_filter(tree: exp.Expression, partition_col: str) -> None:
             f"mandatory partition filter on {partition_col!r} missing "
             f"(WHERE references {sorted(cols)})"
         )
+    # NB: this is name-PRESENCE only — it passes on `WHERE 1=1 OR pickup_datetime>…`
+    # or a same-named column from a JOINed table. That is acceptable because the
+    # **dry-run byte cap (`assert_under_byte_cap`) is the enforcing backstop**: a
+    # query that doesn't actually prune the partition scans too much and is REFUSED
+    # by the cap regardless. Tightening to a top-level conjunctive predicate is a
+    # possible future hardening (it adds fragile AST analysis for marginal gain).
 
 
 def assert_under_byte_cap(estimated_bytes: int, max_bytes_billed: int) -> None:

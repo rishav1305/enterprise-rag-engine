@@ -40,8 +40,10 @@ class FakeBigQueryClient:
         self.dry_run_bytes = dry_run_bytes
         self.rows = rows if rows is not None else [("row",)]
         self.executed: list[str] = []
+        self.dry_run_targets: list[str] = []  # records what was estimated
 
     def dry_run_bytes_for(self, sql: str) -> int:
+        self.dry_run_targets.append(sql)
         return self.dry_run_bytes
 
     def execute(self, sql: str, max_bytes_billed: int) -> list[Any]:
@@ -82,9 +84,10 @@ class GuardedBigQuery:
         # 2. mandatory partition filter (config-gated)
         if self.require_partition_filter:
             assert_partition_filter(tree, self.partition_col)
-        # 3. dry-run estimate vs the byte cap (catches SELECT * / expensive scans)
-        estimate = self.client.dry_run_bytes_for(sql)
-        assert_under_byte_cap(estimate, self.max_bytes_billed)
-        # 4. transpile to BigQuery dialect, then execute with the cap set
+        # 3. transpile to the BigQuery dialect FIRST, then dry-run AND execute the
+        #    SAME string. (Estimating the raw input but executing the transpiled
+        #    string would check the cap against a query that isn't the one run.)
         bq_sql = transpile_bigquery(tree)
+        estimate = self.client.dry_run_bytes_for(bq_sql)
+        assert_under_byte_cap(estimate, self.max_bytes_billed)
         return self.client.execute(bq_sql, self.max_bytes_billed)
