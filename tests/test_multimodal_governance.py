@@ -53,11 +53,12 @@ def test_masked_nontext_is_withheld_across_modalities():
         ScoredChunk(chunk=_mm("tbl:1", "table", "D", 1, [],
                               [["ssn", "123-45-6789"]]), score=1.0),
         ScoredChunk(chunk=_mm("ocr:1", "ocr", "D", 1, [], b"scanned raw"), score=1.0),
+        ScoredChunk(chunk=_mm("fig:1", "figure", "D", 1, [], SECRET_BYTES), score=1.0),
     ]
     admitted, trail = SecurityFilter().apply(chunks, _under_cleared())
 
     assert {d.decision for d in trail} == {"mask"}        # all masked, not denied
-    assert len(admitted) == 3                              # admitted-but-withheld
+    assert len(admitted) == 4                              # admitted-but-withheld (4 modalities)
     for sc in admitted:
         # the raw payload is GONE (withheld) for every modality
         assert get_payload(sc.chunk.metadata) is None, \

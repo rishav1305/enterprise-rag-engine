@@ -47,11 +47,14 @@ def test_ocr_of_restricted_pdf_is_denied_to_under_cleared():
     assert allow == set()    # nothing extracted from the restricted scan is retrievable
 
 
-def test_restricted_image_and_table_also_denied():
+def test_restricted_image_table_figure_also_denied():
+    from rag_engine.multimodal.extract import FakeFigureExtractor
     doc = _restricted_doc()
     img = FakeImageExtractor().extract(doc, raw=b"\x89PNG")
     tbl = FakeTableExtractor().extract(doc, raw=[["x", "1"]])
-    for c in img + tbl:
+    fig = FakeFigureExtractor().extract(doc, raw=b"chart bytes")
+    assert all(c.modality == "figure" for c in fig)   # figure tagged first-class
+    for c in img + tbl + fig:
         assert access.evaluate(c, _under_cleared()).decision == "deny"
 
 

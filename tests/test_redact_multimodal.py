@@ -66,6 +66,68 @@ def test_masked_ocr_payload_is_withheld():
     assert get_payload(out.chunk.metadata) is None
 
 
+def test_masked_figure_payload_is_withheld():
+    sc = _mm_chunk("figure", b"chart raster bytes SECRET")
+    out = redact_chunk(sc, _mask())
+    assert get_payload(out.chunk.metadata) is None
+    assert "figure" in out.chunk.content.lower()
+
+
+def test_masked_nontext_scrubs_bytes_in_every_location():
+    """The withhold contract is 'no raw payload ANYWHERE', not 'pop one key'. Plant
+    bytes under a SECOND top-level key AND inside a nested dict; after a mask, NO
+    bytes value survives anywhere in the redacted metadata.
+
+    BITES: a shallow strip of only MULTIMODAL_PAYLOAD_KEY leaves the second-location
+    and nested bytes -> this fails.
+    """
+    chunk = EnrichedChunk(
+        chunk_id="c", parent_doc_id="d", parent_title="t", content="caption",
+        modality="image",
+        metadata={
+            "mm_payload": b"\x89PNG primary",
+            "raw_bytes": b"SECOND_LOCATION_SECRET",          # a second top-level payload
+            "thumb": {"bytes": b"NESTED_THUMB_SECRET"},      # nested payload
+            "caption": "a safe scalar field",
+        },
+        security=SecurityContext(allowed_roles=[], clearance_level=3,
+                                 sensitivity_class="D", need_to_know_roles=[]),
+    )
+    out = redact_chunk(ScoredChunk(chunk=chunk, score=1.0), _mask())
+
+    # NO bytes value survives anywhere (recursive check).
+    def _has_bytes(obj):
+        if isinstance(obj, (bytes, bytearray)):
+            return True
+        if isinstance(obj, dict):
+            return any(_has_bytes(v) for v in obj.values())
+        if isinstance(obj, (list, tuple)):
+            return any(_has_bytes(v) for v in obj)
+        return False
+
+    assert not _has_bytes(out.chunk.metadata), "raw bytes survived the mask"
+    blob = repr(out.chunk.metadata)
+    assert "SECOND_LOCATION_SECRET" not in blob
+    assert "NESTED_THUMB_SECRET" not in blob
+
+
+def test_redacted_metadata_shares_no_mutable_object_with_original():
+    """Deep-copy: mutating the redacted chunk's nested metadata must not touch the
+    original (a shallow copy would alias the nested dict)."""
+    nested = {"bytes": b"x", "note": "orig"}
+    chunk = EnrichedChunk(
+        chunk_id="c", parent_doc_id="d", parent_title="t", content="cap",
+        modality="image", metadata={"mm_payload": b"p", "thumb": nested},
+        security=SecurityContext(allowed_roles=[], clearance_level=3,
+                                 sensitivity_class="D", need_to_know_roles=[]),
+    )
+    out = redact_chunk(ScoredChunk(chunk=chunk, score=1.0), _mask())
+    # if 'thumb' survives at all it must be a distinct object; and mutating the
+    # original's nested dict must not leak into the redacted one.
+    nested["note"] = "MUTATED_AFTER_REDACT"
+    assert "MUTATED_AFTER_REDACT" not in repr(out.chunk.metadata)
+
+
 def test_allow_passes_payload_through_unchanged():
     sc = _mm_chunk("image", b"public chart bytes")
     out = redact_chunk(sc, _allow())

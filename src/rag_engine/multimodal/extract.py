@@ -83,6 +83,22 @@ class FakeOcrExtractor:
         )]
 
 
+class FakeFigureExtractor:
+    """Deterministic figure extractor (chart/diagram with a caption + raw payload).
+
+    A ``figure`` is a first-class modality (e.g. a chart cropped from a report). Like
+    the others it INHERITS the source classification — a figure from a restricted
+    report is restricted; its raw payload is withheld on a mask.
+    """
+
+    def extract(self, source_doc: Document, raw: Any) -> list[EnrichedChunk]:
+        return [_inherit_chunk(
+            source_doc, f"{source_doc.doc_id}:fig:0", "figure",
+            content=f"figure from {source_doc.title}", payload=raw,
+        )]
+
+
 __all__ = [
-    "ModalityExtractor", "FakeImageExtractor", "FakeTableExtractor", "FakeOcrExtractor",
+    "ModalityExtractor", "FakeImageExtractor", "FakeTableExtractor",
+    "FakeOcrExtractor", "FakeFigureExtractor",
 ]

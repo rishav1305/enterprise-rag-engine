@@ -65,17 +65,20 @@ def redact_chunk(sc: ScoredChunk, decision: GovernanceDecision) -> ScoredChunk:
         return sc
 
     modality = getattr(sc.chunk, "modality", "text")
-    metadata = dict(sc.chunk.metadata)
 
     if modality != "text":
-        # WITHHOLD the raw payload (the enforcement half for non-text) and use a
-        # modality-aware token so the model knows a <modality> was withheld.
-        from ..multimodal.payload import strip_payload
+        # WITHHOLD the raw payload (the enforcement half for non-text). Deep-copy +
+        # scrub the metadata down to a scalar allowlist so NO payload survives
+        # anywhere (a sidecar key / nested thumbnail / structured table), and the
+        # redacted chunk aliases no mutable object from the original.
+        from ..multimodal.payload import scrub_metadata_for_withhold
 
-        strip_payload(metadata)
+        metadata = scrub_metadata_for_withhold(sc.chunk.metadata)
         base = _token_for(decision) or _REDACTIONS[MaskReason.PII_MASK]
         token = f"{base} [{modality} withheld]"
     else:
+        # text: shallow copy is fine (content is a string, no nested payload).
+        metadata = dict(sc.chunk.metadata)
         token = _token_for(decision) or _REDACTIONS[MaskReason.PII_MASK]
 
     redacted = EnrichedChunk(

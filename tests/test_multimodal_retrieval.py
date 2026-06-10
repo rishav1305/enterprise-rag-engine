@@ -72,10 +72,23 @@ def test_denied_image_never_a_candidate_cross_modal():
     assert ids <= {"img:pub"}                      # only the allowed one
 
 
-def test_index_holds_no_raw_payload():
-    # the embedder embeds the TEXT surface, not the raw bytes — so the index can't
-    # leak a payload (defense in depth + ELASTIC).
+def test_index_embeds_text_surface_not_raw_payload():
+    """The embedding IS the caption embedding — NOT the raw bytes. Coupled to the
+    text surface so embedding the payload instead is caught.
+
+    BITES: mutate embed_chunks to embed repr(get_payload(...)) -> the chunk vector no
+    longer equals the caption vector -> these assertions fail.
+    """
+    import numpy as np
     emb = FakeMultimodalEmbedder(dim=64)
-    chunks = [_mm("img:1", "image", "a caption", "B", 1, [])]
-    vecs = emb.embed_chunks(chunks)
-    assert vecs.shape == (1, 64)   # a vector, not bytes
+    chunk = _mm("img:1", "image", "quarterly revenue chart caption", "B", 1, [])
+    # the chunk's embedding equals the embedding of its TEXT surface (the caption)
+    assert np.allclose(emb.embed_chunks([chunk]), emb.embed([chunk.embedding_text]))
+
+    # and two chunks with the SAME caption but DIFFERENT raw payloads embed
+    # IDENTICALLY (proving the payload is not in the embedding at all).
+    a = _mm("a", "image", "identical caption text", "B", 1, [])
+    b = _mm("b", "image", "identical caption text", "B", 1, [])
+    a.metadata["mm_payload"] = b"PAYLOAD_AAAA"
+    b.metadata["mm_payload"] = b"PAYLOAD_BBBB_totally_different"
+    assert np.allclose(emb.embed_chunks([a]), emb.embed_chunks([b]))

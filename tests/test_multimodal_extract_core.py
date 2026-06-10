@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from rag_engine.multimodal.extract import (  # noqa: E402
+    FakeFigureExtractor,
     FakeImageExtractor,
     FakeOcrExtractor,
     FakeTableExtractor,
@@ -32,8 +33,17 @@ def _restricted_doc():
 
 
 def test_extractors_satisfy_protocol():
-    for ex in (FakeImageExtractor(), FakeTableExtractor(), FakeOcrExtractor()):
+    for ex in (FakeImageExtractor(), FakeTableExtractor(), FakeOcrExtractor(),
+               FakeFigureExtractor()):
         assert isinstance(ex, ModalityExtractor)
+
+
+def test_figure_extractor_tags_modality_and_inherits():
+    doc = _restricted_doc()
+    chunks = FakeFigureExtractor().extract(doc, raw=b"chart raster")
+    assert all(c.modality == "figure" for c in chunks)
+    assert all(c.security.sensitivity_class == "F" for c in chunks)
+    assert any(get_payload(c.metadata) is not None for c in chunks)
 
 
 def test_ocr_chunks_inherit_source_classification():
