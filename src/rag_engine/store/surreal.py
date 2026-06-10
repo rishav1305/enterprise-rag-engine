@@ -90,6 +90,21 @@ class SurrealStore:
         rows = self._db.query("SELECT count() AS n FROM chunk GROUP ALL;")
         return int(rows[0]["n"]) if rows else 0
 
+    def delete_chunk(self, chunk_id: str) -> None:
+        """Remove a chunk + its graph edges (P0.9 CDC delete propagation).
+
+        After this the chunk is gone from get_chunk_row, chunk_security_rows (the
+        allowlist source), and all 3 mode queries — so it is UN-retrievable. The
+        ``links`` edges referencing it are deleted too (an orphaned edge would let a
+        graph traversal touch a missing node). RecordID-bound (SECURE). Idempotent:
+        deleting a missing chunk is a no-op (DELETE on no rows does not error).
+        """
+        rid = self._chunk_rid(chunk_id)
+        # delete edges first (both directions), then the node.
+        self._db.query("DELETE $rid->links;", {"rid": rid})
+        self._db.query("DELETE links WHERE out = $rid;", {"rid": rid})
+        self._db.query("DELETE $rid;", {"rid": rid})
+
     def get_chunk_row(self, chunk_id: str) -> dict[str, Any] | None:
         """Full chunk row (text + asset_id + cls + level + vec) by id, or None."""
         rows = self._db.query("SELECT * FROM $rid;", {"rid": self._chunk_rid(chunk_id)})
