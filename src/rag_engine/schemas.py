@@ -102,6 +102,11 @@ class EnrichedChunk(BaseModel):
     )
     security: SecurityContext
     ordinal: int = 0
+    # P0.10: modality tag. "text" (default — back-compat with all text-only call
+    # sites) | "image" | "table" | "ocr" | "figure". Non-text chunks carry their
+    # binary/structured payload in metadata under MULTIMODAL_PAYLOAD_KEY so
+    # governance (redact_chunk) has one place to withhold it.
+    modality: str = "text"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @property
