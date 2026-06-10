@@ -1,10 +1,18 @@
 """ReEmbedder — version-bump re-embedding that PRESERVES governance (P0.9 WORKER-C).
 
 Re-embedding (a new embedding model / dimensionality) must change ONLY the vector
-+ the embedder_version — never a chunk's SecurityContext (cls, level, allowed_roles,
-need_to_know). If a re-embed dropped/altered an ACL field, governance would silently
-change under a routine migration. So the ReEmbedder recomputes ``vec`` from the
-chunk's existing ``text`` and writes it back with the SAME governance fields.
++ the embedder_version — never the chunk's GOVERNANCE-BEARING stored fields. If a
+re-embed dropped/altered one, governance would silently change under a routine
+migration. So the ReEmbedder recomputes ``vec`` from the chunk's existing ``text``
+and writes it back with the SAME stored fields.
+
+What actually governs a chunk: the stored ``cls`` (sensitivity class) and ``level``
+(clearance) are the governance-bearing columns. ``allowed_roles`` and
+``need_to_know_roles`` are NOT persisted on the chunk row — they are DERIVED from
+``cls`` via ``_CLASS_ROLES`` at allowlist time (see ``chunk_source._security``). So
+preserving ``cls`` + ``level`` preserves the FULL governance decision; there are no
+separate role columns to drop. ``_PRESERVED`` therefore lists only the fields that
+genuinely exist on a chunk row, so the set never claims a guarantee it can't enforce.
 
 Resumable + bounded: it processes only rows still on ``old_version`` (so a crashed
 run resumes by re-querying the remaining old-version rows) in batches. On completion
@@ -21,9 +29,12 @@ from ..retrieval.base import Embedder
 
 _log = logging.getLogger(__name__)
 
-# governance + identity fields that MUST survive a re-embed unchanged.
-_PRESERVED = ("chunk_id", "asset_id", "cls", "level", "allowed_roles",
-              "need_to_know", "text")
+# Stored fields that MUST survive a re-embed unchanged — ONLY the columns that
+# actually exist on a chunk row. cls + level are the governance-bearing fields
+# (allowed_roles / need_to_know_roles are cls-DERIVED at allowlist time, not
+# persisted, so there is nothing role-shaped to preserve here). asset_id is the
+# structured-mode key; text is the source the new vector is recomputed from.
+_PRESERVED = ("chunk_id", "asset_id", "cls", "level", "text")
 
 
 class _Store(Protocol):

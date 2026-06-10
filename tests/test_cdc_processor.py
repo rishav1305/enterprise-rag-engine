@@ -62,6 +62,22 @@ def test_out_of_order_stale_event_dropped():
     assert p.store.chunks["c1"]["text"] == "newest"
 
 
+def test_delete_then_reinsert_resurrect_guard():
+    # delete (v2) then a NEWER reinsert (v3) resurrects the chunk; a STALE reinsert
+    # (v1, pre-delete) is dropped -> a deleted chunk can't be resurrected by replaying
+    # an old insert.
+    p = CdcProcessor(_Store(), _Cache())
+    p.apply(_ev(ChangeOp.INSERT, "c1", 1, cls="B", level=1, text="orig"))
+    p.apply(_ev(ChangeOp.DELETE, "c1", 2))
+    assert "c1" not in p.store.chunks
+    # a stale replay of the original insert (version 1 <= last-applied 2) is dropped
+    assert p.apply(_ev(ChangeOp.INSERT, "c1", 1, cls="B", level=1, text="orig")) is False
+    assert "c1" not in p.store.chunks                 # NOT resurrected by a stale event
+    # a legitimate newer reinsert (version 3) is applied
+    assert p.apply(_ev(ChangeOp.INSERT, "c1", 3, cls="B", level=1, text="new")) is True
+    assert p.store.chunks["c1"]["text"] == "new"
+
+
 def test_exact_replay_dropped():
     p = CdcProcessor(_Store(), _Cache())
     ev = _ev(ChangeOp.INSERT, "c1", 1, text="x")

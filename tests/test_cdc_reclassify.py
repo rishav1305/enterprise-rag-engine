@@ -53,6 +53,13 @@ def test_reclassify_up_denies_and_invalidates_cache(surreal_local):
                                  "text": "meridian project notes"}))
     under_cleared = Session(user_id="emp", roles=["EMPLOYEE"], clearance_level=2)
 
+    # FAITHFUL govern_fn: re-derives authorization from the LIVE store on every hit
+    # (exactly what the wired pipeline does), so this test proves BOTH the cache
+    # invalidation AND the re-govern-deny together — belt-and-suspenders.
+    def govern(ids, session):
+        allow = set(authorized_chunk_ids(session, source.all_chunk_security()))
+        return [cid for cid in ids if cid in allow]
+
     # BEFORE: the chunk is on the under-cleared session's allowlist (class-B).
     allow_before = set(authorized_chunk_ids(under_cleared, source.all_chunk_security()))
     assert "doc:1" in allow_before
@@ -60,7 +67,7 @@ def test_reclassify_up_denies_and_invalidates_cache(surreal_local):
     # cache a governed result for the under-cleared session referencing the chunk.
     cache.put("what are the meridian project notes", under_cleared,
               chunk_ids=["doc:1"], answer="notes content (was class-B)")
-    assert cache.get("what are the meridian project notes", under_cleared, _id) is not None
+    assert cache.get("what are the meridian project notes", under_cleared, govern) is not None
 
     # RECLASSIFY UP B -> F (exec-comp, level 5, need-to-know C_SUITE) via CDC.
     proc.apply(ChunkChangeEvent(ChangeOp.RECLASSIFY, "doc:1", 2,
@@ -72,7 +79,9 @@ def test_reclassify_up_denies_and_invalidates_cache(surreal_local):
     assert "doc:1" not in allow_after, "RECLASSIFY: under-cleared session still authorized"
 
     # 2) the stale (permissive) cache entry is INVALIDATED -> a re-query MISSES.
-    assert cache.get("what are the meridian project notes", under_cleared, _id) is None, \
+    #    With the FAITHFUL govern_fn this is doubly safe: even if the entry weren't
+    #    invalidated, the re-govern over the new (class-F) row would deny doc:1.
+    assert cache.get("what are the meridian project notes", under_cleared, govern) is None, \
         "RECLASSIFY LEAK: stale permissive cache entry served now-restricted content"
 
 

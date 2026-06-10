@@ -19,6 +19,14 @@ event whose version is not strictly greater is DROPPED (a replay or a stale
 out-of-order event is a no-op). So processing is safe under at-least-once delivery
 and reordering.
 
+CONTRACT — ``source_version`` MUST be UNIQUE and STRICTLY INCREASING PER EVENT for a
+given chunk (not per logical state). The ordering guard is ``<=``-drop, so two
+DIFFERENT changes that share a version would have the second silently dropped — and
+a same-version reclassify-up would leave the permissive prior state live. The live
+CDC source connector (a tracked follow-on) is responsible for minting a monotonic
+per-chunk version (e.g. a source LSN / commit timestamp / sequence) on EVERY emitted
+event; this is a hard requirement on that connector.
+
 RESILIENT: ``apply`` raising mid-event is retried up to ``max_retries``; a
 persistently failing event is recorded as a ``cdc_dropped`` audit event (never
 silently lost). TRANSPARENT: every applied/dropped event emits a span + audit.

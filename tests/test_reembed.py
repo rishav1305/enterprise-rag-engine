@@ -1,8 +1,11 @@
-"""WORKER-C — re-embedding preserves SecurityContext + bumps version.
+"""WORKER-C — re-embedding preserves governance + bumps version.
 
-A version-bump re-embed must NOT drop/alter a chunk's ACL: cls, level, allowed_roles,
-need_to_know are byte-identical after, and the governance decision is unchanged. The
-new embedding vector + embedder_version are written; the OLD-version cache is
+A version-bump re-embed must NOT drop/alter a chunk's GOVERNANCE: the stored
+governance-bearing columns ``cls`` (sensitivity class) and ``level`` (clearance) are
+byte-identical after, so the full governance decision is unchanged. (allowed_roles /
+need_to_know_roles are cls-DERIVED at allowlist time, not persisted on the row — so
+preserving cls+level preserves the decision; there are no role columns to assert.)
+The new embedding vector + embedder_version are written; the OLD-version cache is
 invalidated (ties to invalidate_version).
 """
 
@@ -92,3 +95,26 @@ def test_reembed_is_resumable_only_touches_old_version(surreal_local):
     n = ReEmbedder(st, HashingEmbedder(dim=1024), "rc2", _SpyCache()).reembed_all("rc1")
     assert n == 1                                   # only the rc1 chunk re-embedded
     assert st.get_chunk_row("new")["vec"] == [1.0] * 1024  # the v2 chunk untouched
+
+
+def test_reembed_resumes_after_partial_run(surreal_local):
+    """An interrupted run resumes: re-querying chunks_by_version(old) returns only
+    the chunks NOT yet migrated, so a second reembed_all finishes the remainder and
+    re-migrating an already-done chunk is impossible (it's no longer on the old
+    version). Models crash-and-resume without re-doing completed work."""
+    st = _store(surreal_local)
+    for i in range(3):
+        st.upsert_chunk({"chunk_id": f"rd{i}", "asset_id": "a1", "cls": "B", "level": 1,
+                         "text": f"chunk {i}", "vec": [0.0] * 1024,
+                         "embedder_version": "rd1"})
+    re = ReEmbedder(st, HashingEmbedder(dim=1024), "rd2", _SpyCache())
+
+    # simulate a partial run: migrate ONE chunk by hand (as if the run crashed after).
+    re._reembed_row(st.get_chunk_row("rd0"))
+    assert len(st.chunks_by_version("rd1")) == 2     # two still on the old version
+
+    # RESUME: a fresh reembed_all only touches the 2 remaining (not the done one).
+    n = re.reembed_all("rd1")
+    assert n == 2
+    assert st.chunks_by_version("rd1") == []         # all migrated now
+    assert len(st.chunks_by_version("rd2")) == 3     # all three on the new version

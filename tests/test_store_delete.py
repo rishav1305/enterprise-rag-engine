@@ -53,6 +53,32 @@ def test_delete_chunk_removes_from_all_modes(surreal_local):
         assert not any("drop" in i for i in result)   # never surfaces in any mode
 
 
+def test_delete_chunk_removes_graph_edges(surreal_local):
+    """The links edges referencing a deleted chunk are gone in BOTH directions —
+    an orphaned edge would let a traversal touch a missing node. This asserts the
+    END STATE directly via the links table (not via graph_neighbors, which yields
+    nothing for a missing node REGARDLESS of edge state — so it can't prove the
+    edges went). The guarantee here is end-state ("no edge references the deleted
+    chunk"), independent of mechanism: SurrealDB cascade-deletes RELATION edges with
+    the node, and delete_chunk also sweeps explicitly as a backstop. A regression
+    that left orphaned edges (e.g. a future non-cascading edge kind without the
+    sweep) is caught here.
+    """
+    st = _store(surreal_local)
+    _seed(st)   # relate_chunks("keep", "drop") -> one keep->drop edge
+    # edge present before the delete
+    before = st._db.query("SELECT * FROM links;") or []
+    assert any("drop" in str(r.get("in")) or "drop" in str(r.get("out")) for r in before)
+
+    st.delete_chunk("drop")
+
+    after = st._db.query("SELECT * FROM links;") or []
+    # NO surviving edge references chunk:drop in either direction
+    assert not any(
+        "drop" in str(r.get("in")) or "drop" in str(r.get("out")) for r in after
+    ), "orphaned links edge survived the chunk delete"
+
+
 def test_delete_chunk_is_idempotent(surreal_local):
     st = _store(surreal_local)
     _seed(st)
