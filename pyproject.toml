@@ -29,6 +29,8 @@ sql = ["sqlglot>=25"]                     # P0.3a read-only AST gate + transpile
 bigquery = ["sqlglot>=25", "google-cloud-bigquery>=3.20"]  # P0.3a live path
 semantic = ["semantic-router>=0.1"]       # P0.3b adaptive router (local encoder)
 llm = ["openai>=1.40"]                     # P0.3b Groq/NVIDIA OpenAI-compatible
+observability = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]  # P0.5 OTel
+langfuse = ["langfuse>=2.0"]               # P0.5 trace export (live)
 # dev installs everything the test suite needs to RUN (no skip-by-missing-dep).
 # (sqlglot is required for the SQL-safety tests; google-cloud-bigquery is the
 # live-path-only dep and stays out of dev — that path is creds-gated/skipped.)
@@ -49,6 +51,7 @@ markers = [
     "cloud: tests that hit SurrealDB Cloud (creds-gated; run with -m cloud). CI runs -m 'not cloud'.",
     "bq: tests that hit live BigQuery (creds-gated; run with -m bq). CI runs -m 'not bq'.",
     "llm: tests that hit a live Groq/NVIDIA LLM (creds-gated; run with -m llm). CI runs -m 'not llm'.",
+    "langfuse: tests that hit live Langfuse (creds-gated; run with -m langfuse). CI runs -m 'not langfuse'.",
 ]
 filterwarnings = [
     # semantic-router 0.1.2 uses deprecated pydantic v1 .dict()/.json() internally;

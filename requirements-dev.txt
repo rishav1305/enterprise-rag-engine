@@ -10,6 +10,8 @@ turbovec==0.7.0
 surrealdb>=2.0
 sqlglot>=25
 semantic-router>=0.1
+opentelemetry-api>=1.20
+opentelemetry-sdk>=1.20
 # deterministic synthetic-data + dataframe deps (P0.1a seeds).
 faker>=40
 polars>=1.0
