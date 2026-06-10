@@ -36,6 +36,10 @@ class CatalogAsset(BaseModel):
     columns: tuple[ColumnPolicy, ...] = Field(default_factory=tuple)
     # row-scoped partial-access predicate (e.g. Engineer sees own-component tickets)
     partial_scope: str = ""
+    # scale + provenance (P0.5) — feed the funnel math + the Sources UI.
+    scale_badge: str = ""          # e.g. "≈1.6B rows · ~400 GB"
+    provenance_url: str = ""       # clickable source link (real sources)
+    row_count: int = 0             # materialized row count (synthetic) / 0 for query-in-place
 
     def masked_columns(self) -> set[str]:
         return {c.name for c in self.columns if c.masked}

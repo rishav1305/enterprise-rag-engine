@@ -88,4 +88,7 @@ class SeedConnector(Connector):
                 columns=tuple(
                     column_policy_for(f.name, f.pii, f.masked) for f in spec.fields
                 ),
+                scale_badge=spec.scale_badge,
+                provenance_url=spec.provenance_url,
+                row_count=spec.row_count,
             )

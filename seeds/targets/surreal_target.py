@@ -29,6 +29,9 @@ def load_estate(store, scale: float = 1.0) -> int:
                 "retrieval_mode": a.retrieval_mode,
                 "owner_department": a.owner_department,
                 "synthetic": a.synthetic,
+                "scale_badge": a.scale_badge,
+                "provenance_url": a.provenance_url,
+                "row_count": a.row_count,
                 "columns": [
                     {"name": f.name, "pii": f.pii, "masked": f.masked}
                     for f in a.fields
