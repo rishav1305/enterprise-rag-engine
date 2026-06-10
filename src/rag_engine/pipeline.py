@@ -33,7 +33,7 @@ from .ingestion.markdown_loader import MarkdownLoader, chunk_document
 from .observability.tracer import Tracer
 from .retrieval.hybrid import HybridRetriever
 from .routing.heuristic_router import HeuristicRouter
-from .schemas import Document, EnrichedChunk, RAGResponse, Session
+from .schemas import Document, EnrichedChunk, RAGResponse, ScoredChunk, Session
 
 
 def _build_contextualizer(cfg: EngineConfig) -> Contextualizer:
@@ -83,6 +83,22 @@ class RAGPipeline:
         # rerank). The L5 SecurityFilter still runs after (defense in depth).
         self.vector_retriever: "TurboVecRetriever | None" = vector_retriever
         self._chunks: list[EnrichedChunk] = []
+        # P0.11a W2: permission-aware semantic cache. Optional; when cfg.cache_enabled
+        # the pipeline checks the cache at query entry with the REAL govern_fn (re-run
+        # SecurityFilter), so a cached answer is re-governed for the requester and a
+        # partial re-redaction forces a fresh recompute (miss). Defaults to an
+        # in-memory cache (no creds).
+        self.cache = None
+        if self.config.cache_enabled and self.config.cache_backend == "memory":
+            from .cache.semantic_cache import SemanticCache
+            from .retrieval.embedders import HashingEmbedder
+
+            self.cache = SemanticCache(
+                embedder=HashingEmbedder(dim=self.config.embedding_dim),
+                similarity_threshold=self.config.cache_similarity_threshold,
+                ttl_seconds=self.config.cache_ttl_seconds,
+                max_entries=self.config.cache_max_entries,
+            )
 
     def asset_for(self, parent_doc_id: str):
         """Resolve the governing CatalogAsset for a chunk's source, if cataloged."""
@@ -108,9 +124,46 @@ class RAGPipeline:
         return self.index_documents(MarkdownLoader(corpus_dir).load())
 
     # ---- query --------------------------------------------------------
+    def _govern_fn(self, chunk_ids, session) -> list[str]:
+        """REAL re-governance for a cache hit: re-run SecurityFilter over the stored
+        chunk ids for this session, return the authorized (decision != deny) ids.
+
+        This is the cache's permission re-derivation — NOT identity. Combined with the
+        cache's miss-on-any-redaction, a stale cache entry can never serve content the
+        requester is no longer cleared for.
+        """
+        by_id = {c.chunk_id: c for c in self._chunks}
+        scored = [ScoredChunk(chunk=by_id[cid], score=1.0)
+                  for cid in chunk_ids if cid in by_id]
+        admitted, _trail = self.security.apply(scored, session)
+        return [sc.chunk.chunk_id for sc in admitted]
+
     def query(self, question: str, session: Session) -> RAGResponse:
         request_id = self.tracer.new_request_id()
         architecture = self.router.route(question)
+
+        # P0.11a W2: permission-aware cache check (real govern_fn). A hit is re-governed
+        # for THIS session; a partial re-redaction -> miss (recompute). Never serves a
+        # cross-clearance or now-restricted answer.
+        if self.cache is not None:
+            hit = self.cache.get(question, session, self._govern_fn)
+            if hit is not None:
+                from .cache.observability import record_cache_hit
+
+                record_cache_hit(
+                    request_id=request_id, similarity=hit.similarity,
+                    scope_fp=hit.scope_fp, n_chunks=len(hit.chunk_ids),
+                    tracer=self.tracer, audit_sink=None,
+                )
+                admitted_chunks = [c for c in self._chunks if c.chunk_id in set(hit.chunk_ids)]
+                return RAGResponse(
+                    query=question, answer=hit.answer, architecture=architecture,
+                    citations=build_citations(
+                        [ScoredChunk(chunk=c, score=1.0) for c in admitted_chunks],
+                        self.config),
+                    access_denied=False, retrieved=len(hit.chunk_ids),
+                    admitted=len(hit.chunk_ids), blocked=0, governance_trail=[],
+                )
         # P0.11a W1: metric-only spans (NO question/answer/chunk text) around the
         # path. A LangfuseExporter is allowlist-filtered, so even these can't leak.
         mode = "vector" if self.vector_retriever is not None else "lexical"
@@ -134,6 +187,14 @@ class RAGPipeline:
         with self.tracer.span("generate", request_id, n_admitted=len(admitted)):
             answer = self.generator.generate(question, admitted)
         blocked = sum(1 for d in trail if d.decision == "deny")
+
+        # P0.11a W2: cache the GOVERNED result keyed by the session's auth scope. The
+        # stored chunk_ids are the ADMITTED (non-deny) ids; on a future hit the cache
+        # re-governs them for the requester (real _govern_fn) before serving.
+        if self.cache is not None:
+            self.cache.put(question, session,
+                           chunk_ids=[sc.chunk.chunk_id for sc in admitted],
+                           answer=answer)
 
         return RAGResponse(
             query=question,
