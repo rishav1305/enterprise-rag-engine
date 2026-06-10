@@ -116,6 +116,25 @@ class EngineConfig:
     embedder_version: str = field(
         default_factory=lambda: os.getenv("RAG_EMBEDDER_VERSION", "hashing-v1")
     )
+    # P0.11b GATE B — deploy-security. The demo API is a PUBLIC URL backed by live keys;
+    # PERFORMANT is scoped 1-user, so a public endpoint needs abuse caps + a synthetic-
+    # data-only guarantee. All config-driven.
+    rate_limit_per_min: int = field(
+        default_factory=lambda: int(os.getenv("RAG_RATE_LIMIT_PER_MIN", "30"))
+    )
+    # INSTANCE-WIDE per-min cap (total across ALL keys) — closes the X-User-Id-rotation
+    # bypass of the per-key cap. Default = 50x the per-key cap.
+    instance_rate_limit_per_min: int = field(
+        default_factory=lambda: int(os.getenv("RAG_INSTANCE_RATE_LIMIT_PER_MIN", "1500"))
+    )
+    query_cap_per_day: int = field(
+        default_factory=lambda: int(os.getenv("RAG_QUERY_CAP_PER_DAY", "500"))
+    )
+    # "synthetic" (demo — refuse to start if a non-synthetic source is configured) |
+    # "production" (real sources permitted). The demo deploy MUST be "synthetic".
+    demo_profile: str = field(
+        default_factory=lambda: os.getenv("RAG_DEMO_PROFILE", "synthetic")
+    )
 
     # self-RAG / corrective loop (P0.8) — CONFIGURABLE, no magic numbers. The loop
     # is BOUNDED (RESILIENT: max_iterations caps re-retrieval so it can't spin).
@@ -180,6 +199,24 @@ class EngineConfig:
         if self.selfrag_grader not in ("fake", "openai"):
             raise ValueError(
                 f"selfrag_grader must be 'fake' or 'openai', got {self.selfrag_grader!r}"
+            )
+        # GATE B knobs
+        if self.rate_limit_per_min < 1:
+            raise ValueError(
+                f"rate_limit_per_min must be >= 1, got {self.rate_limit_per_min}"
+            )
+        if self.query_cap_per_day < 1:
+            raise ValueError(
+                f"query_cap_per_day must be >= 1, got {self.query_cap_per_day}"
+            )
+        if self.instance_rate_limit_per_min < 1:
+            raise ValueError(
+                f"instance_rate_limit_per_min must be >= 1, got "
+                f"{self.instance_rate_limit_per_min}"
+            )
+        if self.demo_profile not in ("synthetic", "production"):
+            raise ValueError(
+                f"demo_profile must be 'synthetic' or 'production', got {self.demo_profile!r}"
             )
 
     @property

@@ -19,23 +19,56 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Header
-from pydantic import BaseModel
+from fastapi import FastAPI, Header, HTTPException
+from pydantic import BaseModel, Field
 
+from .config import EngineConfig
+from .deploy.guards import RateLimiter, RateLimitExceeded, assert_synthetic_only
 from .pipeline import RAGPipeline
 from .schemas import RAGResponse, Session
 
 _CORPUS = Path(os.getenv("RAG_CORPUS_DIR", Path(__file__).resolve().parents[2] / "corpus"))
 
-_state: dict[str, RAGPipeline] = {}
+_state: dict[str, object] = {}
+
+
+def _demo_catalog():
+    """A small synthetic CatalogRegistry so the /funnel viz shows real PB->TB->GB
+    scale (the corpus-only wiring leaves catalog=None -> empty funnel). These are
+    SYNTHETIC assets with stated scale badges — no real data, no row content."""
+    from .catalog.asset import CatalogAsset
+    from .catalog.registry import CatalogRegistry
+    from .schemas import SecurityContext
+
+    reg = CatalogRegistry()
+    demo_assets = [
+        ("nyc_tlc_trips", "TRANSPORT", "A", 0, "≈1.6B rows · ~400 GB"),
+        ("gdelt_events", "NEWS", "A", 0, "≈800M events · ~250 GB"),
+        ("meridian_warehouse", "FINANCE", "C", 2, "≈40M rows · ~12 GB"),
+    ]
+    for aid, vert, cls, lvl, badge in demo_assets:
+        reg._assets[aid] = CatalogAsset(
+            asset_id=aid, vertical=vert, retrieval_mode="structured",
+            sensitivity_class=cls, scale_badge=badge,
+            security=SecurityContext(allowed_roles=[], clearance_level=lvl,
+                                     sensitivity_class=cls, need_to_know_roles=[]),
+        )
+    return reg
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    pipeline = RAGPipeline()
+    cfg = EngineConfig()
+    # GATE B: refuse to start if the synthetic demo profile can reach a real source.
+    assert_synthetic_only(cfg)
+    pipeline = RAGPipeline(config=cfg, catalog=_demo_catalog())
     count = pipeline.index_corpus(_CORPUS)
     app.state.indexed_chunks = count
     _state["pipeline"] = pipeline
+    # GATE B: per-key abuse cap (rate-limit + per-day) BEFORE any LLM/embedding call.
+    _state["rate_limiter"] = RateLimiter(
+        cfg.rate_limit_per_min, cfg.query_cap_per_day,
+        instance_per_min=cfg.instance_rate_limit_per_min)
     yield
     _state.clear()
 
@@ -47,21 +80,143 @@ class QueryRequest(BaseModel):
     question: str
 
 
+class Citation(BaseModel):
+    """A client-facing citation — only the ADMITTED (governed) sources."""
+
+    parent_doc_id: str
+    parent_title: str
+    quote: str
+
+
+class ClientRAGResponse(BaseModel):
+    """The CLIENT-facing response. CRITICAL (P0.11b FIX): the full ``governance_trail``
+    (denied-doc ids, required_roles, required-clearance reasons) is OPERATOR-ONLY — it
+    goes to the audit sink, NEVER to the HTTP requester. A denied caller learns only
+    that some items were withheld (a COUNT), never WHAT exists or what unlocks it.
+    """
+
+    query: str
+    answer: str
+    architecture: str
+    citations: list[Citation] = Field(default_factory=list)
+    access_denied: bool = False
+    admitted: int = 0
+    n_withheld: int = 0   # COUNT only — never the ids/ACLs of withheld content
+
+
+def _to_client_response(resp: "RAGResponse") -> ClientRAGResponse:
+    """Strip the operator-only trail/ACL metadata at the API boundary. The full
+    RAGResponse (incl. governance_trail) stays internal for audit; the client sees a
+    redacted view: governed citations + a withheld COUNT, no ACL details, no denied ids.
+    """
+    # withheld = anything the governance trail did not fully ALLOW (deny + mask +
+    # partial). COUNT only — the client never learns WHICH items or their ACLs.
+    n_withheld = sum(1 for d in resp.governance_trail if d.decision != "allow")
+    return ClientRAGResponse(
+        query=resp.query,
+        answer=resp.answer,
+        architecture=str(getattr(resp.architecture, "value", resp.architecture)),
+        citations=[Citation(parent_doc_id=c.parent_doc_id,
+                            parent_title=c.parent_title, quote=c.quote)
+                   for c in resp.citations],
+        access_denied=resp.access_denied,
+        admitted=resp.admitted,
+        n_withheld=n_withheld,
+    )
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "indexed_chunks": app.state.indexed_chunks}
 
 
-@app.post("/query", response_model=RAGResponse)
+@app.get("/personas")
+def personas() -> dict:
+    """B2 — read-only switcher metadata: persona title/roles/clearance ONLY (no
+    content). The UI uses this to populate the persona dropdown; the actual governance
+    happens server-side from the headers, never from this list."""
+    from seeds.emit import build_oracle
+
+    p = build_oracle()["personas"]
+    return {"personas": [
+        {"key": k, "title": v["title"], "roles": list(v["roles"]),
+         "clearance": v["level"]}
+        for k, v in p.items()
+    ]}
+
+
+@app.get("/glossary")
+def glossary() -> dict:
+    """B4 — read-only opaque-schema mapping (text_2 -> "customer name"). Exposes ONLY
+    the schema mapping (table/physical/meaning/confidence) — NO row data, NO example
+    values (which could carry real-shaped data)."""
+    from .enrichment.schema_glossary.view_miner import mine_views
+
+    try:
+        from seeds.synthetic.legacy_mart import LEGACY_VIEWS
+        mined = mine_views(LEGACY_VIEWS)   # {(table, physical): meaning}
+        entries = [{"table": t, "physical": p, "means": m, "confidence": "high"}
+                   for (t, p), m in sorted(mined.items())]
+    except Exception:
+        entries = []
+    return {"glossary": entries}   # mapping only — NO row data / example values
+
+
+@app.get("/funnel")
+def funnel() -> dict:
+    """B5 — read-only PB->TB->GB scale viz. Stated scale numbers + the stage collapse
+    only — no row content."""
+    pipe = _state["pipeline"]
+    catalog = getattr(pipe, "catalog", None)
+    stages = []
+    if catalog is not None:
+        try:
+            from .funnel.trace import compute_funnel
+            # PB-tail head = the catalog's stated-scale assets; the indexable path uses
+            # the demo's representative collapse counts (PB stated -> GB indexable ->
+            # the top-k that actually reaches the model).
+            pb_ids = tuple(a.asset_id for a in catalog.all())
+            counts = {"indexable_derivative": 50_000, "structured_prefilter": 4_000,
+                      "coarse_ann": 200, "rerank": 8, "final_top_k": 5}
+            t = compute_funnel(catalog, candidate_counts=counts,
+                               pb_tail_asset_ids=pb_ids)
+            stages = t.to_rows()
+        except Exception:
+            stages = []
+    return {"funnel": stages}
+
+
+@app.post("/query", response_model=ClientRAGResponse)
 def query(
     req: QueryRequest,
     x_user_id: str = Header(default="anonymous"),
     x_user_roles: str = Header(default="PUBLIC"),
     x_clearance: int = Header(default=0),
-) -> RAGResponse:
+) -> ClientRAGResponse:
+    # GATE B: abuse cap keyed by user id, BEFORE the (potentially live) LLM/embedding
+    # call. A public URL backed by live keys would otherwise let anyone run up bills.
+    limiter = _state.get("rate_limiter")
+    if limiter is not None:
+        try:
+            limiter.check(x_user_id)
+        except RateLimitExceeded as e:
+            raise HTTPException(status_code=429, detail=e.reason) from e
+
+    # ROBUST: clamp the header clearance to the valid [0,5] range so a malformed value
+    # (99/-3) is a clean 4xx, never a 500 panic. (Non-int already 422s at parse time.)
+    try:
+        clearance = int(x_clearance)
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=422, detail="X-Clearance must be an integer") from e
+    if not (0 <= clearance <= 5):
+        raise HTTPException(status_code=422, detail="X-Clearance must be in [0,5]")
+
     session = Session(
         user_id=x_user_id,
         roles=[r.strip() for r in x_user_roles.split(",") if r.strip()],
-        clearance_level=int(x_clearance),
+        clearance_level=clearance,
     )
-    return _state["pipeline"].query(req.question, session)
+    # the pipeline audits the FULL governance_trail server-side (self.audit.record);
+    # the client gets the REDACTED view (no trail/ACL details, withheld COUNT only).
+    full = _state["pipeline"].query(req.question, session)
+    return _to_client_response(full)
