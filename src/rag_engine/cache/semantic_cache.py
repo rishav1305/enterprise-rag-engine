@@ -188,6 +188,18 @@ class SemanticCache:
         self._entries.move_to_end(key)
         self._evict()
 
+    def invalidate_chunk(self, chunk_id: str) -> None:
+        """Drop every cache entry whose result referenced ``chunk_id`` (P0.9 CDC).
+
+        When a chunk is deleted or RECLASSIFIED, any cached answer computed over it
+        is stale — and for reclassify-up it could serve now-restricted content. So
+        we drop every entry referencing it; a re-query recomputes under the new
+        state. Idempotent: an unknown id drops nothing.
+        """
+        stale = [k for k, e in self._entries.items() if chunk_id in e.chunk_ids]
+        for k in stale:
+            del self._entries[k]
+
     def _evict(self) -> None:
         # Drop expired first (cheap, bounds memory), then LRU over the cap.
         now = time.monotonic()

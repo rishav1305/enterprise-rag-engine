@@ -90,10 +90,42 @@ class SurrealStore:
         rows = self._db.query("SELECT count() AS n FROM chunk GROUP ALL;")
         return int(rows[0]["n"]) if rows else 0
 
+    def delete_chunk(self, chunk_id: str) -> None:
+        """Remove a chunk (P0.9 CDC delete propagation).
+
+        After this the chunk is gone from get_chunk_row, chunk_security_rows (the
+        allowlist source), and all 3 mode queries — so it is UN-retrievable. The
+        chunk's ``links`` graph edges go too: SurrealDB CASCADE-deletes RELATION
+        edges when their endpoint node is removed (verified — a node-only delete
+        leaves zero orphaned links rows), so deleting the node is sufficient. We
+        keep an explicit defensive edge-sweep as belt-and-suspenders in case a
+        non-RELATION ``links`` row ever exists; the cascade is the primary mechanism
+        (the `test_delete_chunk_removes_graph_edges` test asserts the END STATE — no
+        edge references the deleted chunk — regardless of which mechanism cleaned it).
+        RecordID-bound (SECURE). Idempotent: deleting a missing chunk is a no-op.
+        """
+        rid = self._chunk_rid(chunk_id)
+        # node delete first — RELATION edges cascade with it. The explicit sweeps
+        # below are a harmless backstop for any stray non-cascading edge row.
+        self._db.query("DELETE $rid;", {"rid": rid})
+        self._db.query("DELETE links WHERE in = $rid OR out = $rid;", {"rid": rid})
+
     def get_chunk_row(self, chunk_id: str) -> dict[str, Any] | None:
         """Full chunk row (text + asset_id + cls + level + vec) by id, or None."""
         rows = self._db.query("SELECT * FROM $rid;", {"rid": self._chunk_rid(chunk_id)})
         return rows[0] if rows else None
+
+    def chunks_by_version(self, embedder_version: str) -> list[dict[str, Any]]:
+        """Chunk rows whose embedder_version matches (P0.9 re-embed migration).
+
+        Used by the ReEmbedder to find the chunks still on an old embedding version
+        so re-embedding is resumable + only touches stale rows. Param-bound (SECURE).
+        """
+        rows = self._db.query(
+            "SELECT * FROM chunk WHERE embedder_version = $ev;",
+            {"ev": embedder_version},
+        )
+        return list(rows) if rows else []
 
     def relate_chunks(self, src_chunk_id: str, dst_chunk_id: str) -> None:
         """Create a directed ``links`` graph edge between two chunks (P0.6 graph).

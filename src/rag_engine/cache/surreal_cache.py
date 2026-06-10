@@ -130,6 +130,17 @@ class SurrealCacheStore:
             _log.exception("cache_hit audit write failed (user=%s) — hit still served",
                            session.user_id)
 
+    def invalidate_chunk(self, chunk_id: str) -> None:
+        """Drop every durable entry whose result referenced ``chunk_id`` (P0.9 CDC).
+
+        Same contract as the in-memory engine: a delete/reclassify of the chunk
+        makes any cached answer over it stale; dropping the entries forces a
+        recompute under the new state. Idempotent; chunk_id bound as a param (SECURE).
+        """
+        self.store._db.query(
+            "DELETE query_cache WHERE $cid IN chunk_ids;", {"cid": chunk_id}
+        )
+
     def invalidate_version(self, stale_version: str) -> None:
         """CDC seam (P0.9): drop entries embedded with a now-stale embedder version."""
         self.store._db.query(
