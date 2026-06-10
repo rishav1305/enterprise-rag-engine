@@ -12,6 +12,8 @@ Model (relationship tuples written per chunk, mirroring the access.evaluate rule
     chunk:<id> min_level            -> int (required clearance)
     chunk:<id> ntk_role             -> role        (0..n need-to-know roles)
     chunk:<id> partial_role         -> role        (0..n scoped-access roles)
+    chunk:<id> allowed_role         -> role        (0..n legacy allowed_roles; the
+                                                    un-classed role gate, access.py:87)
 
 A session is {roles, clearance_level}. ``authorized_ids`` returns the chunks whose
 governance decision is NOT deny — computed from the tuples, NOT by calling
@@ -39,7 +41,7 @@ class ReBACTuple:
     """One relationship fact: (resource, relation, value)."""
 
     resource: str   # "chunk:<id>"
-    relation: str   # public|class|min_level|ntk_role|partial_role
+    relation: str   # public|class|min_level|ntk_role|partial_role|allowed_role
     value: str
 
 
@@ -61,6 +63,11 @@ def governance_tuples(chunk: EnrichedChunk) -> list[ReBACTuple]:
     partial_for = (chunk.metadata or {}).get("partial_for", []) if chunk.metadata else []
     for r in partial_for:
         tuples.append(ReBACTuple(rid, "partial_role", r))
+    # Legacy allowed_roles — the role gate access.py:87 applies to UN-CLASSED
+    # non-public chunks. Emitted always (cheap); the decision only consults them on
+    # the un-classed leg, mirroring access.py exactly.
+    for r in sec.allowed_roles:
+        tuples.append(ReBACTuple(rid, "allowed_role", r))
     return tuples
 
 
@@ -95,11 +102,17 @@ def _decision_is_retrievable(facts: dict, session: Session) -> bool:
             return True  # partial (scoped) access -> retrievable
         return False
 
-    # legacy un-classed role gate is handled in access.py via allowed_roles; for
-    # classed chunks (which carry tuples) level+NTK fully decide -> retrievable.
-    # Un-classed legacy chunks have no class tuple AND no ntk: they rely on the
-    # caller having public/min_level set; absent a role tuple we treat a non-public
-    # un-classed chunk's allowed_roles via min_level only (the demo corpus is classed).
+    # legacy allowed_roles gate — mirrors access.py:87 EXACTLY: for an UN-CLASSED
+    # (sensitivity_class == "") non-public chunk, deny when the session's roles are
+    # disjoint from the chunk's allowed_roles. Classed chunks are fully decided by
+    # the level + need-to-know gates above and must NOT be role-gated here (that was
+    # the original _CLASS_ROLES drift bug). This closes the LocalReBAC divergence:
+    # previously this returned True unconditionally, leaking role-gated legacy chunks.
+    if not cls:
+        allowed = facts.get("allowed_role", set())
+        if roles.isdisjoint(allowed):
+            return False
+
     return True
 
 
@@ -119,7 +132,7 @@ class LocalReBACAllowlist:
         for chunk in chunks:
             facts: dict = {}
             for t in governance_tuples(chunk):
-                if t.relation in ("ntk_role", "partial_role"):
+                if t.relation in ("ntk_role", "partial_role", "allowed_role"):
                     facts.setdefault(t.relation, set()).add(t.value)
                 else:
                     facts[t.relation] = t.value

@@ -65,3 +65,19 @@ def test_store_modes_empty_allowlist_fail_closed(surreal_local):
     assert st.graph_neighbors("n1", []) == []
     assert st.structured_rows("a1", []) == []
     assert st.fulltext_search("meridian", []) == []
+
+
+def test_store_modes_phantom_allow_id_returns_nothing(surreal_local):
+    """An allow id with NO backing chunk row must surface nothing — a phantom id
+    can't conjure a row, and (defense in depth) can't widen results either."""
+    from rag_engine.store.surreal import SurrealStore
+    st = SurrealStore(dsn=surreal_local["dsn"], ns=surreal_local["ns"],
+                      db=surreal_local["db"], user=surreal_local["user"],
+                      password=surreal_local["pass"])
+    st.connect()
+    st.apply_schema()
+    _seed(st)
+    phantom = ["does_not_exist", "also_missing"]   # ids with no chunk rows
+    assert st.graph_neighbors("n1", phantom) == []        # n2 not in allow -> nothing
+    assert st.structured_rows("a1", phantom) == []        # no matching row id
+    assert st.fulltext_search("meridian", phantom) == []  # no matching hit id

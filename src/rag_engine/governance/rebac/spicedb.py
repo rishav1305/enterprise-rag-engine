@@ -32,12 +32,15 @@ definition chunk {
     relation viewer_by_level: user:*
     relation ntk: user
     relation partial: user
+    relation allowed_role: user   // legacy un-classed role gate (access.py:87)
 
     // A session is granted view when the in-process sync wrote it the matching
-    // grants (public, or level-cleared, or NTK/partial). The sync layer (this
-    // backend) computes level/class outcomes and writes the resulting grants so
-    // LookupResources(view) == InProcessAllowlist.
-    permission view = public + viewer_by_level + ntk + partial
+    // grants (public, or level-cleared, or NTK/partial, or the legacy allowed_role
+    // grant for un-classed chunks). The sync layer (this backend) computes
+    // level/class outcomes and writes the resulting grants so
+    // LookupResources(view) == InProcessAllowlist. allowed_role MUST be included or
+    // the backend inherits the LocalReBAC un-classed-leak blind spot.
+    permission view = public + viewer_by_level + ntk + partial + allowed_role
 }
 """.strip()
 

@@ -20,11 +20,14 @@ OSO_POLICY = """
 actor User {}
 resource Chunk {
   permissions = ["view"];
-  roles = ["public", "level_cleared", "ntk", "partial"];
+  # allowed_role = the legacy un-classed role gate (access.py:87); MUST be present
+  # or this policy inherits the LocalReBAC un-classed-leak blind spot.
+  roles = ["public", "level_cleared", "ntk", "partial", "allowed_role"];
   "view" if "public";
   "view" if "level_cleared";
   "view" if "ntk";
   "view" if "partial";
+  "view" if "allowed_role";
 }
 """.strip()
 

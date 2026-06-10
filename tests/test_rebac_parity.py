@@ -25,7 +25,8 @@ from rag_engine.governance.rebac import LocalReBACAllowlist  # noqa: E402
 from rag_engine.schemas import EnrichedChunk, SecurityContext, Session  # noqa: E402
 
 
-def _chunk(cid, cls, level, ntk=None, public=False, partial_for=None):
+def _chunk(cid, cls, level, ntk=None, public=False, partial_for=None,
+           allowed_roles=None):
     meta = {"partial_for": partial_for} if partial_for else {}
     # is_public is DERIVED (clearance_level==0 AND PUBLIC/no roles); model a public
     # chunk that way rather than via a (nonexistent) flag.
@@ -33,8 +34,14 @@ def _chunk(cid, cls, level, ntk=None, public=False, partial_for=None):
         sec = SecurityContext(allowed_roles=["PUBLIC"], clearance_level=0,
                               sensitivity_class=cls, need_to_know_roles=[])
     else:
-        sec = SecurityContext(allowed_roles=ntk or [], clearance_level=level,
-                              sensitivity_class=cls, need_to_know_roles=ntk or [])
+        # allowed_roles defaults to ntk for the classed legs; the un-classed LEGACY
+        # leg sets allowed_roles INDEPENDENTLY (ntk empty) so access.py:87's
+        # role-gate fires.
+        sec = SecurityContext(
+            allowed_roles=allowed_roles if allowed_roles is not None else (ntk or []),
+            clearance_level=level, sensitivity_class=cls,
+            need_to_know_roles=ntk or [],
+        )
     return EnrichedChunk(
         chunk_id=cid, parent_doc_id=cid, parent_title="t", content="x",
         security=sec, metadata=meta,
@@ -43,7 +50,8 @@ def _chunk(cid, cls, level, ntk=None, public=False, partial_for=None):
 
 def _candidate_matrix():
     """A spread spanning every governance leg: public, PII-mask, level-gate,
-    need-to-know, partial-scope, and exec-comp deny."""
+    need-to-know, partial-scope, exec-comp deny, AND the un-classed LEGACY role gate
+    (access.py:87) — the leg the divergence lived in."""
     return [
         _chunk("pub", "A", 1, public=True),            # public -> always allow
         _chunk("internal", "C", 2),                    # level gate L2
@@ -52,6 +60,13 @@ def _candidate_matrix():
         _chunk("comp", "F", 5, ntk=["C_SUITE"]),       # NTK + level 5
         _chunk("ticket", "G", 3, ntk=["ENGINEERING"],  # NTK with partial-scope path
                 partial_for=["ON_CALL"]),
+        # ---- un-classed LEGACY role gate (sensitivity_class == "") ----------
+        # access.py:87 DENIES when session roles are disjoint from allowed_roles.
+        _chunk("legacy_fin", "", 1, allowed_roles=["FINANCE"]),   # role-gated: FINANCE only
+        _chunk("legacy_eng", "", 1, allowed_roles=["ENGINEERING"]),  # match-role variant
+        # un-classed, level-0 but NOT public (has a non-PUBLIC required role) — must
+        # NOT be treated as public; role gate still applies.
+        _chunk("legacy_l0", "", 0, allowed_roles=["HR_ADMIN"]),
     ]
 
 
@@ -61,6 +76,10 @@ def _session_matrix():
         Session(user_id="analyst", roles=["EMPLOYEE"], clearance_level=2),
         Session(user_id="mgr", roles=["MANAGER", "ENGINEERING"], clearance_level=3),
         Session(user_id="oncall", roles=["ON_CALL"], clearance_level=2),
+        # oncall_sr exercises the partial-scope POSITIVE path: ON_CALL + L>=3 so the
+        # 'ticket' chunk grants scoped (partial) access -> retrievable. Without this
+        # cell, a never-grant-scoped mutation passes parity silently (over-deny hole).
+        Session(user_id="oncall_sr", roles=["ON_CALL"], clearance_level=3),
         Session(user_id="dir", roles=["DIRECTOR"], clearance_level=4),
         Session(user_id="cfo", roles=["C_SUITE", "FINANCE"], clearance_level=5),
         Session(user_id="nobody", roles=[], clearance_level=0),
