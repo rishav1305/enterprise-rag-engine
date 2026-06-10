@@ -74,6 +74,19 @@ def test_durable_invalidate_version_clears_stale(surreal_local):
     assert c.get("what is Q3 revenue", s, _id) is None  # invalidated -> miss
 
 
+def test_durable_invalidate_chunk_drops_referencing_entry(surreal_local):
+    from rag_engine.schemas import Session
+    st = _store(surreal_local)
+    c = _cache(st)
+    s = Session(user_id="a", roles=["FINANCE"], clearance_level=3)
+    c.put("what is Q3 revenue", s, chunk_ids=["c1", "c2"], answer="42")
+    c.put("what is the vacation policy", s, chunk_ids=["c3"], answer="pto")
+    c.invalidate_chunk("c2")                          # c2 reclassified/deleted
+    assert c.get("what is Q3 revenue", s, _id) is None      # stale entry gone
+    assert c.get("what is the vacation policy", s, _id) is not None  # unrelated kept
+    c.invalidate_chunk("c2")                          # idempotent
+
+
 def test_durable_partial_denial_is_miss(surreal_local):
     from rag_engine.schemas import Session
     c = _cache(_store(surreal_local))
