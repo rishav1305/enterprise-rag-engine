@@ -51,6 +51,11 @@ class EngineConfig:
     sql_llm_model: str = field(
         default_factory=lambda: os.getenv("RAG_SQL_LLM_MODEL", "llama-3.3-70b-versatile")
     )
+    # opaque-schema glossary drafter (P0.4): "fake" (deterministic, tests) |
+    # "groq" | "nvidia" (live, creds-gated). Uses sql_llm_base_url/model.
+    glossary_drafter: str = field(
+        default_factory=lambda: os.getenv("RAG_GLOSSARY_DRAFTER", "fake")
+    )
 
     # generation
     max_quote_chars: int = 240
