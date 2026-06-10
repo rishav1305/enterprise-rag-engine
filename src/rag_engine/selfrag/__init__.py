@@ -12,5 +12,9 @@ from .grader import (
     GroundednessGrade,
     RelevanceGrade,
 )
+from .loop import CorrectiveLoop, LoopResult, LoopStep
 
-__all__ = ["Grader", "FakeGrader", "RelevanceGrade", "GroundednessGrade"]
+__all__ = [
+    "Grader", "FakeGrader", "RelevanceGrade", "GroundednessGrade",
+    "CorrectiveLoop", "LoopResult", "LoopStep",
+]
