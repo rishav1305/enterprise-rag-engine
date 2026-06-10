@@ -19,8 +19,12 @@ from .extract import (
     FakeTableExtractor,
     ModalityExtractor,
 )
+from .embed import FakeMultimodalEmbedder
+from .robust import PayloadTooLarge, check_payload_size, guarded_extract
 
 __all__ = [
     "MULTIMODAL_PAYLOAD_KEY", "attach_payload", "get_payload", "strip_payload",
     "ModalityExtractor", "FakeImageExtractor", "FakeTableExtractor", "FakeOcrExtractor",
+    "FakeMultimodalEmbedder",
+    "PayloadTooLarge", "check_payload_size", "guarded_extract",
 ]
