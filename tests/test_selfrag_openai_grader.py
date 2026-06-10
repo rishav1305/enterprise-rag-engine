@@ -65,6 +65,23 @@ def test_malformed_groundedness_is_fail_closed():
     assert grade.grounded is False   # fail-closed: never pass on an unparseable grade
 
 
+def test_non_bool_sufficient_string_does_not_pass():
+    # an untrusted LLM string must NOT truthy-coerce to sufficient=True.
+    g = _grader('{"sufficient": "yes maybe", "score": 0.9}')
+    assert g.grade_relevance("q", [_sc("ctx")]).sufficient is False
+
+
+def test_string_true_does_not_pass_grounded():
+    # "true" (string) is not JSON true -> must not pass.
+    g = _grader('{"grounded": "true", "score": 0.9}')
+    assert g.grade_groundedness("q", "a", [_sc("ctx")]).grounded is False
+
+
+def test_truthy_number_does_not_pass():
+    g = _grader('{"sufficient": 1, "score": 0.9}')
+    assert g.grade_relevance("q", [_sc("ctx")]).sufficient is False
+
+
 def test_empty_chunks_short_circuit_without_calling_llm():
     called = {"n": 0}
     g = OpenAICompatGrader("http://x", "m", "k")

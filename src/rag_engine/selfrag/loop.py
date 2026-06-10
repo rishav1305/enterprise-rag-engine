@@ -19,12 +19,16 @@ emits a step so the loop is TRANSPARENT and its stop reason is on the provenance
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..governance.filter import SecurityFilter
 from ..schemas import ScoredChunk, Session
 from .grader import Grader
+
+_log = logging.getLogger(__name__)
 
 # Injected, session-scoped retrieval. The loop passes (reformulated_query, SESSION);
 # the session is fixed for the whole run — the loop cannot change it.
@@ -52,8 +56,8 @@ class LoopResult:
     answer: str = ""
     abstained: bool = False
     iterations: int = 0
-    stop_reason: str = ""   # grounded | budget_exhausted | ungrounded |
-                            # insufficient_retrieval | grader_degraded
+    stop_reason: str = ""   # grounded | ungrounded | insufficient_retrieval |
+                            # grader_degraded
     chunks: list[ScoredChunk] = field(default_factory=list)
     steps: list[LoopStep] = field(default_factory=list)
 
@@ -85,6 +89,9 @@ class CorrectiveLoop:
         self.tracer = tracer
         self.funnel = funnel
         self.request_id = request_id
+        # Second-stage governance the loop self-applies after every retrieve (the
+        # same enforcement pipeline.py runs): redacts mask/partial -> [REDACTED].
+        self._security = SecurityFilter()
 
     def run(self, query: str, session: Session) -> LoopResult:
         result = LoopResult()
@@ -95,6 +102,13 @@ class CorrectiveLoop:
             result.iterations = i
             # 1) RETRIEVE — session-scoped, allowlist-pre-filtered. SESSION FIXED.
             chunks = self.retrieve_fn(current_query, session)
+            # 1b) SELF-GOVERN (defense in depth): the allowlist pre-filter only drops
+            # `deny`. The SECOND governance stage — SecurityFilter.apply — REDACTS
+            # `mask`/`partial` content ([REDACTED]). The loop applies it here so the
+            # grader, generator, and provenance (result.chunks) ONLY EVER see redacted
+            # content, regardless of what retrieve_fn returned. Idempotent if the
+            # wired retrieve_fn already redacts (double-redaction is harmless).
+            chunks, _trail = self._security.apply(chunks, session)
             step = LoopStep(iteration=i, query=current_query, n_retrieved=len(chunks),
                             relevance_score=0.0, relevance_sufficient=False)
 
@@ -149,18 +163,19 @@ class CorrectiveLoop:
             current_query = self.reformulate_fn(current_query, i)
 
         # budget exhausted without a grounded answer -> ABSTAIN (fail-closed, no
-        # fabrication). stop_reason records WHY (last attempt ungrounded vs never
-        # sufficient) so the provenance is honest.
+        # fabrication). stop_reason records WHY so the provenance is honest. Exactly
+        # two terminal cases are reachable: the last attempt generated an UNGROUNDED
+        # answer, or retrieval was never sufficient (so we never generated). A step
+        # with relevance_sufficient=True always has grounded set (True->returned,
+        # False->ungrounded), so there is no third "exhausted" case.
         result.abstained = True
         result.answer = ""
         last = result.steps[-1] if result.steps else None
         if last is not None and last.grounded is False:
             result.stop_reason = "ungrounded"
             result.chunks = best[1] if best else []
-        elif last is not None and not last.relevance_sufficient:
-            result.stop_reason = "insufficient_retrieval"
         else:
-            result.stop_reason = "budget_exhausted"
+            result.stop_reason = "insufficient_retrieval"
         return result
 
     def _degrade(self, result: LoopResult, chunks: list[ScoredChunk]) -> LoopResult:
@@ -173,10 +188,17 @@ class CorrectiveLoop:
 
     @staticmethod
     def _safe(fn):
-        """Grader circuit breaker: a grader raising must not crash/hang the loop."""
+        """Grader circuit breaker: a grader raising must not crash/hang the loop.
+
+        TRANSPARENT: the swallowed error is LOGGED (not silently dropped) so a
+        grader failure is observable in the logs even though the request degrades
+        gracefully rather than propagating.
+        """
         try:
             return fn()
         except Exception:
+            _log.warning("self-RAG grader call failed — degrading (abstain)",
+                         exc_info=True)
             return None
 
     def _emit(self, step: LoopStep) -> None:

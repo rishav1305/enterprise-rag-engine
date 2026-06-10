@@ -28,6 +28,7 @@ from rag_engine.selfrag.loop import CorrectiveLoop  # noqa: E402
 from rag_engine.schemas import EnrichedChunk, ScoredChunk, SecurityContext, Session  # noqa: E402
 
 SECRET_MARKER = "EXEC_COMP_4POINT2M_SECRET"
+SSN_MARKER = "SSN_123_45_6789_RAW_PII"   # class-D PII (mask-tier) raw value
 
 
 def _chunk(cid, cls, level, ntk, text):
@@ -105,3 +106,51 @@ def test_cleared_session_DOES_see_the_chunk_sanity():
     cfo = Session(user_id="cfo", roles=["C_SUITE"], clearance_level=5)
     allow = set(authorized_chunk_ids(cfo, _CORPUS))
     assert "comp:1" in allow
+
+
+# ---- MASK-tier (REDACTION) — the second governance stage the loop must apply ----
+class _Echo:
+    """Generator that echoes its context — so any unredacted content WOULD surface
+    in the answer (a faithful probe for the redaction bypass)."""
+    def generate(self, query, admitted):
+        return " ".join(c.chunk.content for c in admitted)
+
+
+def test_loop_redacts_mask_tier_pii_in_answer_and_provenance():
+    """A class-D PII chunk is on the ALLOWLIST (mask != deny), so retrieve_fn returns
+    it — but the loop must self-apply SecurityFilter so the raw SSN is [REDACTED]
+    before it reaches the grader / generator / result.chunks.
+
+    BITES: remove the loop's redaction step -> the raw SSN echoes into the answer
+    and sits raw in result.chunks -> these assertions fail (the confirmed leak).
+    """
+    # class-D PII chunk: mask-tier for an L2 session (admitted-but-redacted), and a
+    # relevant public chunk so the query is gradeable as sufficient.
+    corpus = [
+        _chunk("pii:1", "D", 1, [], f"employee record {SSN_MARKER} on file"),
+        _chunk("pub:1", "B", 1, [], "employee record lookup overview details"),
+    ]
+
+    def retrieve_fn(query, session):
+        allow = set(authorized_chunk_ids(session, corpus))   # pii:1 IS allowed (mask)
+        return [ScoredChunk(chunk=c, score=1.0) for c in corpus if c.chunk_id in allow]
+
+    under_cleared = Session(user_id="a", roles=["EMPLOYEE"], clearance_level=2)
+    # sanity: the PII chunk is genuinely on the allowlist (it's mask, not deny)
+    assert "pii:1" in set(authorized_chunk_ids(under_cleared, corpus))
+
+    loop = CorrectiveLoop(
+        retrieve_fn=retrieve_fn,
+        generator=_Echo(),
+        grader=FakeGrader(relevance_threshold=0.2, groundedness_threshold=0.1),
+        max_iterations=2,
+    )
+    res = loop.run("employee record lookup", under_cleared)
+
+    # the raw SSN must NOT appear in the answer...
+    assert SSN_MARKER not in (res.answer or ""), "MASK-TIER LEAK: raw PII in answer"
+    # ...nor raw in the loop's provenance chunks (they must be [REDACTED])
+    provenance_text = " ".join(sc.chunk.content for sc in res.chunks)
+    assert SSN_MARKER not in provenance_text, "MASK-TIER LEAK: raw PII in result.chunks"
+    assert any("[REDACTED]" in sc.chunk.content for sc in res.chunks), \
+        "the mask-tier chunk should be admitted-but-redacted, not dropped"

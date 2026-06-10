@@ -71,9 +71,11 @@ class OpenAICompatGrader:
             return RelevanceGrade(False, 0.0, "no chunks retrieved")
         user = f"QUESTION:\n{query}\n\nCONTEXT:\n{_context_text(chunks)}"
         data = self._parse_json(self._complete(_RELEVANCE_SYS, user))
-        # fail-closed: an unparseable/empty grade is NOT sufficient.
+        # fail-closed + STRICT: sufficient ONLY on a real JSON `true`. Untrusted LLM
+        # output like {"sufficient": "yes maybe"} or "true" (string) must NOT pass via
+        # truthy coercion — require the boolean True.
         return RelevanceGrade(
-            sufficient=bool(data.get("sufficient", False)),
+            sufficient=(data.get("sufficient") is True),
             score=float(data.get("score", 0.0) or 0.0),
             reason=str(data.get("reason", "")),
         )
@@ -87,7 +89,9 @@ class OpenAICompatGrader:
                 f"CONTEXT:\n{_context_text(chunks)}")
         data = self._parse_json(self._complete(_GROUNDED_SYS, user))
         return GroundednessGrade(
-            grounded=bool(data.get("grounded", False)),   # fail-closed
+            # STRICT: grounded ONLY on a real JSON `true` (no truthy coercion of
+            # untrusted LLM strings) — fail-closed otherwise.
+            grounded=(data.get("grounded") is True),
             score=float(data.get("score", 0.0) or 0.0),
             reason=str(data.get("reason", "")),
             unsupported_spans=list(data.get("unsupported_spans", []) or []),

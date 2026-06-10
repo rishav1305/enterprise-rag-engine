@@ -92,7 +92,7 @@ def test_abstains_when_retrieval_never_sufficient():
     )
     res = loop.run("what is Q3 revenue", _session())
     assert res.abstained is True
-    assert res.stop_reason in ("budget_exhausted", "insufficient_retrieval")
+    assert res.stop_reason == "insufficient_retrieval"   # exact: never got relevant context
     assert res.answer == "" or res.answer is None  # no fabricated answer served
 
 
@@ -108,7 +108,7 @@ def test_abstains_when_answer_ungrounded():
     )
     res = loop.run("what is Q3 revenue", _session())
     assert res.abstained is True
-    assert res.stop_reason in ("budget_exhausted", "ungrounded")
+    assert res.stop_reason == "ungrounded"   # exact: relevant context, ungrounded answer
 
 
 def test_iterations_never_exceed_cap():
