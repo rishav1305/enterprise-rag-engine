@@ -104,6 +104,12 @@ class EngineConfig:
     cache_backend: str = field(
         default_factory=lambda: os.getenv("RAG_CACHE_BACKEND", "memory")
     )
+    # P0.11a W6: multimodal payload size bound (ELASTIC — guarded_extract rejects +
+    # audits an oversized binary so a giant upload can't blow memory). Default 25 MiB.
+    multimodal_max_payload_bytes: int = field(
+        default_factory=lambda: int(os.getenv("RAG_MM_MAX_PAYLOAD_BYTES",
+                                              str(25 * 1024 * 1024)))
+    )
 
     # self-RAG / corrective loop (P0.8) — CONFIGURABLE, no magic numbers. The loop
     # is BOUNDED (RESILIENT: max_iterations caps re-retrieval so it can't spin).

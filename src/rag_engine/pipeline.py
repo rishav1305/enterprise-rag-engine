@@ -127,6 +127,28 @@ class RAGPipeline:
         self.retriever.index(all_chunks)
         return len(all_chunks)
 
+    def index_multimodal(self, source_doc: Document, raw, extractor) -> int:
+        """W6 — ingest a NON-TEXT source through guarded_extract.
+
+        The extractor runs under guarded_extract (a crash or oversized payload is
+        AUDITED, not silent), and every produced chunk INHERITS the source doc's
+        SecurityContext (no declassify-by-extraction). The chunks are added to the
+        index + governed by the SAME L5 SecurityFilter as text at query time — so a
+        masked image is withheld, a denied table is dropped, identically. Returns the
+        number of multimodal chunks added.
+        """
+        from .multimodal.robust import guarded_extract
+
+        mm_chunks = guarded_extract(
+            extractor, source_doc, raw,
+            audit_sink=getattr(self, "audit_sink", None),
+            max_payload_bytes=self.config.multimodal_max_payload_bytes,
+        )
+        if mm_chunks:
+            self._chunks = list(self._chunks) + list(mm_chunks)
+            self.retriever.index(self._chunks)
+        return len(mm_chunks)
+
     def index_corpus(self, corpus_dir: str | Path) -> int:
         return self.index_documents(MarkdownLoader(corpus_dir).load())
 
