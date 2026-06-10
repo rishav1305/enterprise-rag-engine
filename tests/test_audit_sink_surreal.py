@@ -46,3 +46,17 @@ def test_malformed_drop_durable_via_surreal_sink(surreal_local):
     rows = sink.query_kind("malformed_chunk_dropped")
     assert any(r["detail"]["chunk_id"] == "bad-2" for r in rows)
     st.close()
+
+
+def test_surreal_audit_record_has_no_chunk_content(surreal_local):
+    import json
+    st = _store(surreal_local, "saudit_nopii")
+    st.upsert_chunk({"chunk_id": "bad-x", "asset_id": "bad", "cls": "ZZ",
+                     "level": 1, "text": "SENTINEL_PII_secret@victim.com", "vec": [0.0] * 8})
+    sink = SurrealAuditSink(st)
+    source = SurrealChunkSource(st, audit_sink=sink)
+    source.get_chunk("bad-x")
+    rows = sink.query_kind("malformed_chunk_dropped")
+    assert rows
+    assert "SENTINEL_PII" not in json.dumps(rows, default=str)
+    st.close()

@@ -71,3 +71,57 @@ def test_no_sink_still_works(surreal_local):
     source = SurrealChunkSource(st)   # no sink
     assert source.get_chunk("bad-3") is None
     st.close()
+
+
+# ---- FIX 1: audit sink is a fail-safe side channel (down sink != crashed query) --
+class _FailingSink:
+    def record_event(self, kind, detail):
+        raise RuntimeError("simulated SurrealDB outage")
+
+
+def test_failing_audit_sink_does_not_crash_get_chunk(surreal_local):
+    st = SurrealStore(dsn=surreal_local["dsn"], ns="meridian", db="audit_fail_get",
+                      user="root", password="root")
+    st.connect()
+    st.apply_schema(vector_dim=8)
+    st.upsert_chunk({"chunk_id": "bad-1", "asset_id": "bad", "cls": "ZZ",
+                     "level": 1, "text": "secret", "vec": [0.0] * 8})
+    source = SurrealChunkSource(st, audit_sink=_FailingSink())
+    # the sink raises, but the request must SURVIVE (the drop still happens)
+    assert source.get_chunk("bad-1") is None    # no exception propagated
+    st.close()
+
+
+def test_failing_audit_sink_does_not_crash_allowlist(surreal_local):
+    st = SurrealStore(dsn=surreal_local["dsn"], ns="meridian", db="audit_fail_allow",
+                      user="root", password="root")
+    st.connect()
+    st.apply_schema(vector_dim=8)
+    st.upsert_chunk({"chunk_id": "bad-2", "asset_id": "bad", "cls": "ZZ",
+                     "level": 1, "text": "x", "vec": [0.0] * 8})
+    st.upsert_chunk({"chunk_id": "good-1", "asset_id": "good", "cls": "B",
+                     "level": 1, "text": "y", "vec": [0.0] * 8})
+    source = SurrealChunkSource(st, audit_sink=_FailingSink())
+    ids = {ec.chunk_id for ec in source.all_chunk_security()}   # no raise
+    assert "good-1" in ids and "bad-2" not in ids
+    st.close()
+
+
+# ---- FIX 2: LOCK the no-PII contract on audit records ---------------------------
+def test_audit_record_contains_no_chunk_content(surreal_local):
+    import json
+    st = SurrealStore(dsn=surreal_local["dsn"], ns="meridian", db="audit_nopii",
+                      user="root", password="root")
+    st.connect()
+    st.apply_schema(vector_dim=8)
+    # seed a dropped chunk whose TEXT is a PII sentinel
+    st.upsert_chunk({"chunk_id": "bad-3", "asset_id": "bad", "cls": "ZZ",
+                     "level": 1, "text": "SENTINEL_PII_secret@victim.com", "vec": [0.0] * 8})
+    sink = InMemoryAuditSink()
+    source = SurrealChunkSource(st, audit_sink=sink)
+    source.get_chunk("bad-3")
+    rec = sink.by_kind("malformed_chunk_dropped")[0]
+    # the audit record must carry NO chunk content (only where/chunk_id/cls)
+    assert "SENTINEL_PII" not in json.dumps(rec)
+    assert set(rec["detail"].keys()) == {"where", "chunk_id", "cls"}
+    st.close()

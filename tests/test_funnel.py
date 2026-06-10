@@ -13,7 +13,7 @@ import pytest  # noqa: E402
 
 from rag_engine.catalog.connector import SeedConnector  # noqa: E402
 from rag_engine.catalog.registry import CatalogRegistry  # noqa: E402
-from rag_engine.funnel.trace import FunnelTrace, compute_funnel  # noqa: E402
+from rag_engine.funnel.trace import FunnelStage, FunnelTrace, compute_funnel  # noqa: E402
 
 
 def test_funnel_is_monotonic_non_increasing():
@@ -47,9 +47,22 @@ def test_compute_funnel_from_catalog_pb_tail():
     pb = [r for r in rows if r["stage"].startswith("pb_tail")]
     assert any("≈1.6B" in r["note"] or "rows" in r["note"] for r in pb)
     assert all(r["provenance_url"].startswith("http") for r in pb)
-    # the counted indexable path is monotonic
+    # the counted indexable path is monotonic AND complete (all 5 stages, in order)
     assert t.is_monotonic_non_increasing()
-    assert t.counted[-1] == 5
+    assert t.counted == [50_000, 4_000, 200, 8, 5]   # no middle stage dropped
+    indexable_names = [r["stage"] for r in rows if not r["stage"].startswith("pb_tail")]
+    assert indexable_names == ["indexable_derivative", "structured_prefilter",
+                               "coarse_ann", "rerank", "final_top_k"]
+
+
+def test_is_monotonic_non_increasing_falsification():
+    # falsify the predicate directly with a hand-built non-monotonic list, bypassing
+    # the constructor guard (which would reject the increase on add).
+    t = FunnelTrace()
+    object.__setattr__(t, "stages", [
+        FunnelStage("a", count=10), FunnelStage("b", count=20),  # 10 -> 20 increase
+    ])
+    assert not t.is_monotonic_non_increasing()
 
 
 def test_none_count_pb_tail_does_not_break_monotonic():

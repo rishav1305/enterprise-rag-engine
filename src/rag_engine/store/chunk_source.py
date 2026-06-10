@@ -67,10 +67,23 @@ class SurrealChunkSource:
         self.audit_sink = audit_sink
 
     def _audit_drop(self, where: str, chunk_id, cls) -> None:
-        if self.audit_sink is not None:
+        # RESILIENT: the audit sink is a SIDE CHANNEL — its failure (e.g. a
+        # SurrealDB outage) must NOT crash the retrieval request. The `_log.warning`
+        # drop line already fired before this is called, so a sink failure is logged
+        # (via _log.exception) and swallowed here, never re-raised. Fail-open on the
+        # AUDIT write only; the governance drop itself already happened (fail-closed).
+        if self.audit_sink is None:
+            return
+        try:
             self.audit_sink.record_event(
                 "malformed_chunk_dropped",
                 {"where": where, "chunk_id": str(chunk_id), "cls": cls},
+            )
+        except Exception:
+            _log.exception(
+                "audit sink write failed for malformed-chunk drop (chunk=%s, where=%s) "
+                "— retrieval continues; the drop is still logged above",
+                chunk_id, where,
             )
 
     def get_chunk(self, chunk_id: str) -> EnrichedChunk | None:

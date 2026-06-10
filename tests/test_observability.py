@@ -66,3 +66,20 @@ def test_otel_enabled_does_not_break_when_sdk_present_or_absent():
     with t.span("retrieve", request_id=rid):
         pass
     assert col.by_request(rid)   # the in-memory collector still records
+
+
+def test_span_attributes_do_not_carry_content_by_construction():
+    # the tracer records ONLY the attributes the caller passes; a careless caller
+    # is the risk (tracked: Langfuse attribute allowlist). Here we pin that the
+    # tracer itself adds no content: a span with metric-only attrs carries no
+    # seeded PII sentinel anywhere in its recorded attributes.
+    col = InMemorySpanCollector()
+    t = Tracer(col, otel=False)
+    rid = Tracer.new_request_id()
+    sentinel = "SENTINEL_PII_secret@victim.com"
+    with t.span("generate", request_id=rid, tokens=200, cost_usd=0.001):
+        pass  # caller passes ONLY metrics, never content
+    sp = col.by_request(rid)[0]
+    assert all(sentinel not in str(v) for v in sp.attributes.values())
+    # only the metric attributes are present
+    assert set(sp.attributes) == {"tokens", "cost_usd"}
