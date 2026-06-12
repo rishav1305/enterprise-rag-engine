@@ -248,13 +248,14 @@ class TraceRequest(BaseModel):
 
 
 def _require_synthetic() -> None:
-    """G1: /trace is SYNTHETIC-ONLY — a trace surfaces governance internals, so it must
-    NEVER run against a real-data profile (no real PII can enter a trace). The startup
+    """G1/G4: the glass-box endpoints (/trace, /trace/catalog, /oracle) are
+    SYNTHETIC-ONLY — they surface governance internals, so they must NEVER run against
+    a real-data profile (no real PII can enter a trace or an oracle grid). The startup
     guard already refused a live source; this is the per-request backstop."""
     cfg = _state.get("config")
     if cfg is not None and getattr(cfg, "demo_profile", "synthetic") != "synthetic":
         raise HTTPException(status_code=403,
-                            detail="/trace is available only under the synthetic demo profile")
+                            detail="this endpoint is available only under the synthetic demo profile")
 
 
 def _rate_limit(key: str) -> None:
