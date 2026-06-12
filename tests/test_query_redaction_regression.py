@@ -53,6 +53,19 @@ def test_query_denied_persona_no_acl_metadata_anywhere(client):
     assert r.json().get("n_withheld", 0) >= 1
 
 
+def test_n_withheld_stable_warm_vs_cold(client):
+    # FIX4: an identical under-cleared query twice must report the SAME n_withheld
+    # (cold = trail-derived, warm = cache hit). A warm hit must NOT under-report to 0.
+    q = "n-withheld warm-vs-cold stability probe exec compensation"
+    h = {"X-User-Id": "stable", "X-User-Roles": "INTERN", "X-Clearance": "1"}
+    cold = client.post("/query", json={"question": q}, headers=h).json()
+    warm = client.post("/query", json={"question": q}, headers=h).json()
+    assert cold["n_withheld"] >= 1, "cold query should withhold at least 1 item"
+    assert warm["n_withheld"] == cold["n_withheld"], (
+        f"warm n_withheld {warm['n_withheld']} != cold {cold['n_withheld']} "
+        "(cache hit under-reported the withheld count)")
+
+
 def test_query_customer_pii_masked_not_raw(client):
     # the G0 class-D doc: an L2 analyst's /query answer must not contain raw PII.
     r = client.post("/query", json={"question": "customer account record dana"},

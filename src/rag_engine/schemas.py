@@ -192,5 +192,9 @@ class RAGResponse(BaseModel):
     retrieved: int = 0
     admitted: int = 0
     blocked: int = 0
+    # the GOVERNED withheld count (deny+mask+partial). Carried explicitly so a CACHE
+    # HIT (which intentionally returns an empty trail) still reports the true count —
+    # the client n_withheld is stable warm vs cold.
+    n_withheld: int = 0
     governance_trail: list[GovernanceDecision] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

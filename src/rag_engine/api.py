@@ -118,8 +118,11 @@ def _to_client_response(resp: "RAGResponse") -> ClientRAGResponse:
     redacted view: governed citations + a withheld COUNT, no ACL details, no denied ids.
     """
     # withheld = anything the governance trail did not fully ALLOW (deny + mask +
-    # partial). COUNT only — the client never learns WHICH items or their ACLs.
-    n_withheld = sum(1 for d in resp.governance_trail if d.decision != "allow")
+    # partial). COUNT only — the client never learns WHICH items or their ACLs. Use the
+    # explicit resp.n_withheld (authoritative + STABLE across cache hits, where the
+    # trail is intentionally empty); fall back to the trail for older callers.
+    n_withheld = resp.n_withheld or sum(
+        1 for d in resp.governance_trail if d.decision != "allow")
     return ClientRAGResponse(
         query=resp.query,
         answer=resp.answer,

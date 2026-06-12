@@ -122,13 +122,6 @@ def _gate_fired_for(decision_reason: str) -> str:
     return "clearance_and_role"
 
 
-def _required_level_for(cls: str) -> int | None:
-    """The class's min level (presentation for the governance row). Local A-N table."""
-    table = {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4, "F": 5, "G": 4, "H": 4,
-             "I": 5, "J": 4, "K": 3, "L": 2, "M": 5, "N": 5}
-    return table.get(cls)
-
-
 def _span_ms(collector: InMemorySpanCollector, request_id: str, name: str) -> int:
     for sp in collector.by_request(request_id):
         if sp.name == name:
@@ -183,7 +176,11 @@ def build_trace(question: str, session: Session, config: EngineConfig | None = N
         key_terms=_key_terms(question),
         embedding_preview=[round(float(x), 4) for x in vec[:8]],
         embedding_dim=cfg.embedding_dim,
-        intent_shape="lookup" if len(question.split()) <= 8 else "analytical",
+        # a length HEURISTIC (not engine classification) — labeled so the FE/viewer
+        # doesn't read it as a model output. The real engine classification is
+        # detected_topic below (the router's architecture for this query).
+        intent_shape=("short-form (heuristic)" if len(question.split()) <= 8
+                      else "long-form (heuristic)"),
         detected_topic=(architecture.value if hasattr(architecture, "value") else str(architecture)),
     )
 
@@ -191,13 +188,15 @@ def build_trace(question: str, session: Session, config: EngineConfig | None = N
     #     access.evaluate's output via SecurityFilter). One row per retrieved candidate. ---
     governance: list[GovDecision] = []
     for cand, dec in zip(candidates, trail):
-        cls = cand.chunk.security.sensitivity_class
+        sec = cand.chunk.security
         governance.append(GovDecision(
             title=cand.chunk.parent_title,
             decision=dec.decision,
             gate_fired=_gate_fired_for(dec.reason),
             reason=dec.reason,
-            required_level=_required_level_for(cls),
+            # ENGINE-SOURCED: the chunk's real required clearance (None for public),
+            # never a hardcoded table that can drift from the corpus.
+            required_level=None if sec.is_public else sec.clearance_level,
             required_roles=list(dec.required_roles),
         ))
 

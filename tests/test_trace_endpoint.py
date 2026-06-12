@@ -94,3 +94,31 @@ def test_trace_refuses_non_synthetic_profile():
         os.environ.pop("RAG_DEMO_PROFILE", None)
         os.environ.pop("GROQ_API_KEY", None)
         _state.pop("config", None)
+
+
+def test_trace_rate_limit_returns_429(monkeypatch):
+    # FIX3: the /trace rate-limit must be enforced (removing the limiter from
+    # _guarded_session would otherwise pass the suite silently).
+    monkeypatch.setenv("RAG_RATE_LIMIT_PER_MIN", "2")
+    monkeypatch.setenv("RAG_QUERY_CAP_PER_DAY", "1000")
+    from rag_engine.api import app
+    with TestClient(app) as c:
+        h = {"X-User-Id": "abuser", "X-User-Roles": "PUBLIC", "X-Clearance": "0"}
+        assert c.post("/trace", json={"question": "hi"}, headers=h).status_code == 200
+        assert c.post("/trace", json={"question": "hi"}, headers=h).status_code == 200
+        r = c.post("/trace", json={"question": "hi"}, headers=h)
+        assert r.status_code == 429   # 3rd within the minute -> rate-limited
+
+
+def test_trace_catalog_403_under_production(monkeypatch):
+    # FIX3: /trace/catalog must REFUSE (403) over HTTP under a non-synthetic profile.
+    # (The startup synthetic guard would refuse to BOOT with a live cred, so we set the
+    # profile to production WITHOUT a live cred so the app boots, then assert the
+    # per-request guard 403s.)
+    monkeypatch.setenv("RAG_DEMO_PROFILE", "production")
+    from rag_engine.api import app
+    with TestClient(app) as c:
+        assert c.get("/trace/catalog").status_code == 403
+        r = c.post("/trace", json={"question": "hi"},
+                   headers={"X-User-Id": "t", "X-User-Roles": "PUBLIC", "X-Clearance": "0"})
+        assert r.status_code == 403
