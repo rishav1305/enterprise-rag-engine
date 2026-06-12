@@ -248,23 +248,29 @@ class TraceRequest(BaseModel):
 
 
 def _require_synthetic() -> None:
-    """G1: /trace is SYNTHETIC-ONLY — a trace surfaces governance internals, so it must
-    NEVER run against a real-data profile (no real PII can enter a trace). The startup
+    """G1/G4: the glass-box endpoints (/trace, /trace/catalog, /oracle) are
+    SYNTHETIC-ONLY — they surface governance internals, so they must NEVER run against
+    a real-data profile (no real PII can enter a trace or an oracle grid). The startup
     guard already refused a live source; this is the per-request backstop."""
     cfg = _state.get("config")
     if cfg is not None and getattr(cfg, "demo_profile", "synthetic") != "synthetic":
         raise HTTPException(status_code=403,
-                            detail="/trace is available only under the synthetic demo profile")
+                            detail="this endpoint is available only under the synthetic demo profile")
+
+
+def _rate_limit(key: str) -> None:
+    """Shared rate-limit backstop (mirrors /query + /trace)."""
+    limiter = _state.get("rate_limiter")
+    if limiter is not None:
+        try:
+            limiter.check(key)
+        except RateLimitExceeded as e:
+            raise HTTPException(status_code=429, detail=e.reason) from e
 
 
 def _guarded_session(x_user_id, x_user_roles, x_clearance) -> Session:
     """Shared: rate-limit + clearance clamp + build the Session (mirrors /query)."""
-    limiter = _state.get("rate_limiter")
-    if limiter is not None:
-        try:
-            limiter.check(x_user_id)
-        except RateLimitExceeded as e:
-            raise HTTPException(status_code=429, detail=e.reason) from e
+    _rate_limit(x_user_id)
     try:
         clearance = int(x_clearance)
     except (TypeError, ValueError) as e:
@@ -303,3 +309,18 @@ def trace_catalog() -> dict:
     _require_synthetic()
     from .catalog.estate import build_estate
     return build_estate()
+
+
+@app.get("/oracle")
+def oracle(x_user_id: str = Header(default="anonymous")) -> dict:
+    """The LIVE 210-cell leak oracle (15 personas x 14 classes A-N) — the engine's
+    REAL per-cell governance result, computed on request (NOT a hardcoded grid).
+    Each cell is driven through access.evaluate exactly as tests/test_leak_oracle.py
+    does, and cross-checked against the independent seeds-side ground truth; a cell
+    is ``leaked`` iff the engine reveals more than the ground truth permits. Returns
+    booleans + labels + decision strings only — no content, no PII. Synthetic-only,
+    rate-limited."""
+    _require_synthetic()
+    _rate_limit(x_user_id)
+    from .catalog.oracle import build_oracle_grid
+    return build_oracle_grid()
