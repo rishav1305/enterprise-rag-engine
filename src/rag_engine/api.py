@@ -72,6 +72,7 @@ async def lifespan(app: FastAPI):
     count = pipeline.index_corpus(_CORPUS)
     app.state.indexed_chunks = count
     _state["pipeline"] = pipeline
+    _state["config"] = cfg   # G1: per-request synthetic-profile check on /trace
     # GATE B: per-key abuse cap (rate-limit + per-day) BEFORE any LLM/embedding call.
     _state["rate_limiter"] = RateLimiter(
         cfg.rate_limit_per_min, cfg.query_cap_per_day,
@@ -236,3 +237,66 @@ def query(
     # the client gets the REDACTED view (no trail/ACL details, withheld COUNT only).
     full = _state["pipeline"].query(req.question, session)
     return _to_client_response(full)
+
+
+# ---- G1: the glass-box /trace endpoints ----------------------------------
+class TraceRequest(BaseModel):
+    question: str
+
+
+def _require_synthetic() -> None:
+    """G1: /trace is SYNTHETIC-ONLY — a trace surfaces governance internals, so it must
+    NEVER run against a real-data profile (no real PII can enter a trace). The startup
+    guard already refused a live source; this is the per-request backstop."""
+    cfg = _state.get("config")
+    if cfg is not None and getattr(cfg, "demo_profile", "synthetic") != "synthetic":
+        raise HTTPException(status_code=403,
+                            detail="/trace is available only under the synthetic demo profile")
+
+
+def _guarded_session(x_user_id, x_user_roles, x_clearance) -> Session:
+    """Shared: rate-limit + clearance clamp + build the Session (mirrors /query)."""
+    limiter = _state.get("rate_limiter")
+    if limiter is not None:
+        try:
+            limiter.check(x_user_id)
+        except RateLimitExceeded as e:
+            raise HTTPException(status_code=429, detail=e.reason) from e
+    try:
+        clearance = int(x_clearance)
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=422, detail="X-Clearance must be an integer") from e
+    if not (0 <= clearance <= 5):
+        raise HTTPException(status_code=422, detail="X-Clearance must be in [0,5]")
+    return Session(
+        user_id=x_user_id,
+        roles=[r.strip() for r in x_user_roles.split(",") if r.strip()],
+        clearance_level=clearance,
+    )
+
+
+@app.post("/trace")
+def trace(
+    req: TraceRequest,
+    x_user_id: str = Header(default="anonymous"),
+    x_user_roles: str = Header(default="PUBLIC"),
+    x_clearance: int = Header(default=0),
+) -> dict:
+    """The glass-box trace: the engine's REAL per-query trace (governance parity with
+    access.evaluate). Synthetic-only, rate-limited, clearance-clamped. /query is
+    unchanged (this is additive)."""
+    _require_synthetic()
+    session = _guarded_session(x_user_id, x_user_roles, x_clearance)
+    from .trace import build_trace
+
+    cfg = _state.get("config")
+    return build_trace(req.question, session, config=cfg).model_dump()
+
+
+@app.get("/trace/catalog")
+def trace_catalog() -> dict:
+    """The full estate (23 sources) for the Datasets tab. Synthetic-only; read-only
+    metadata (name/type/scale/class/clearance/provenance/live_queryable) — no row data."""
+    _require_synthetic()
+    from .catalog.estate import build_estate
+    return build_estate()
