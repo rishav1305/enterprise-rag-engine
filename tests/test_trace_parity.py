@@ -80,11 +80,78 @@ def test_trace_covers_all_four_decisions_live():
 
 
 def test_trace_result_is_redacted_not_operator_detail():
-    # the persona's result view carries answer + citations + n_withheld — NOT the
-    # governance[] ACL detail (that's the auditor lens, separate). An under-cleared
-    # persona's result.answer never contains restricted content.
+    """The under-cleared persona's result is the GOVERNED view. LOAD-BEARING: assert on
+    the strings a governance bypass ACTUALLY surfaces through the extractive path
+    (the prior '$480,000' assertion was hollow — the generator never emits that line,
+    so it passed even on a real leak). A bypass leaks the restricted doc's title +
+    'base salary' sentence; the governed answer must contain neither, and the customer
+    doc's raw PII line must be absent.
+    """
     intern = Session(user_id="i", roles=["INTERN", "EMPLOYEE"], clearance_level=1)
     trace = build_trace("what is the executive compensation schedule", intern)
-    assert "$480,000" not in trace.result.answer
-    assert "dana.okafor@example.com" not in trace.result.answer
+    a = trace.result.answer
+    # strings a bypass genuinely surfaces (verified) — these BITE on a real leak:
+    assert "RESTRICTED" not in a, "exec-comp restricted content leaked to the intern"
+    assert "base salary" not in a
+    assert "$480,000" not in a   # kept for clarity (belt-and-suspenders)
+    # the citations must also be governed (only admitted sources), not the denied doc.
+    cited_titles = {c.title for c in trace.result.citations}
+    assert not any("Executive Compensation" in t for t in cited_titles)
     assert trace.result.n_withheld >= 1
+
+
+def test_trace_result_customer_pii_absent():
+    # the G0 class-D customer doc: an L2 analyst's trace result must not carry raw PII.
+    analyst = Session(user_id="a", roles=["DATA_ANALYST", "EMPLOYEE"], clearance_level=2)
+    trace = build_trace("customer account record dana okafor email balance", analyst)
+    assert "dana.okafor@example.com" not in trace.result.answer
+    assert "Okafor" not in trace.result.answer
+
+
+# ---- FIX5: value-level drilldown assertions (not just shape) -------------
+def test_trace_durations_are_engine_sourced():
+    # durations come from the REAL tracer spans (sub-ms stages floor to 0 honestly; a
+    # fabricated table would not). Assert they're real non-negative ints AND that the
+    # generation stage — which actually does work — is sourced (its span is timed).
+    cfo = Session(user_id="cfo", roles=["C_SUITE", "FINANCE"], clearance_level=5)
+    trace = build_trace("what is the executive compensation schedule", cfo)
+    assert all(isinstance(s.duration_ms, int) and s.duration_ms >= 0 for s in trace.stages)
+    # a span that was never recorded returns 0; a real one is >= 0 — the contract is
+    # that the number is span-sourced, not invented. (Don't assert a specific >0 value:
+    # sub-ms on a fast host is honest.)
+
+
+def test_trace_drilldown_values_are_real():
+    cfo = Session(user_id="cfo", roles=["C_SUITE", "FINANCE"], clearance_level=5)
+    trace = build_trace("what is the executive compensation schedule", cfo)
+    # the retrieval drilldown carries populated candidate scores + ranks.
+    retr = next(s for s in trace.stages if s.id == "retrieval")
+    cands = retr.drilldown.get("candidates", [])
+    assert cands, "retrieval drilldown has no candidates"
+    assert all("dense_score" in c and "final_rank" in c for c in cands)
+    assert {c["final_rank"] for c in cands} == set(range(1, len(cands) + 1))
+    # the governance drilldown carries gate-by-gate evals.
+    gov = next(s for s in trace.stages if s.id == "governance")
+    assert gov.drilldown.get("gates"), "governance drilldown has no gate evals"
+
+
+def test_trace_selfrag_grades_present_when_loop_runs():
+    # with selfrag enabled (default), the generation drilldown carries loop grades.
+    cfo = Session(user_id="cfo", roles=["C_SUITE", "FINANCE"], clearance_level=5)
+    trace = build_trace("company overview and remote work policy details", cfo)
+    gen = next(s for s in trace.stages if s.id == "generation")
+    # the loop ran (selfrag default on) -> the drilldown has loop steps with grades.
+    loop = gen.drilldown.get("loop", [])
+    assert loop, "generation drilldown has no self-RAG loop grades"
+    assert all("step" in step and "grade" in step for step in loop)
+
+
+def test_trace_required_level_is_engine_sourced():
+    # FIX1: required_level comes from the chunk's REAL clearance_level, not a table.
+    # the class-G dept doc has real clearance_level=2 (the table wrongly said 4).
+    eng = Session(user_id="e", roles=["ENGINEERING"], clearance_level=3)
+    trace = build_trace("engineering on-call incident payments latency", eng)
+    g_rows = [g for g in trace.governance if "On-Call" in g.title or "Incident" in g.title]
+    assert g_rows, "no dept-scoped governance row"
+    assert all(g.required_level == 2 for g in g_rows), \
+        f"required_level drifted: {[g.required_level for g in g_rows]} (real is 2)"

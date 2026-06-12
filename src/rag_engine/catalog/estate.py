@@ -1,4 +1,7 @@
-"""Estate assembler (G1) — the full 23-source data estate for the Datasets tab.
+"""Estate assembler (G1) — the full data estate (31 sources) for the Datasets tab.
+
+build_estate() returns 31 sources: 6 LIVE demo docs (the indexed corpus) + 7 real
+PB-tail public sources + 18 synthetic estate sources.
 
 Runtime-safe STATIC data (mirrors `seeds/real/sources.py` + the synthetic source
 metadata + the live demo docs) — NO `seeds` import (that pulls heavy seed-gen deps at

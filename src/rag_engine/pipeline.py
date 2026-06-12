@@ -316,7 +316,11 @@ class RAGPipeline:
                         [ScoredChunk(chunk=c, score=1.0) for c in admitted_chunks],
                         self.config),
                     access_denied=False, retrieved=len(hit.chunk_ids),
-                    admitted=len(hit.chunk_ids), blocked=0, governance_trail=[],
+                    admitted=len(hit.chunk_ids), blocked=0,
+                    # report the TRUE withheld count from put-time (the trail is empty
+                    # on a hit, but the count is preserved) so warm == cold.
+                    n_withheld=int(hit.metadata.get("n_withheld", 0)),
+                    governance_trail=[],
                 )
         # P0.11a W1: metric-only spans (NO question/answer/chunk text) around the
         # path. A LangfuseExporter is allowlist-filtered, so even these can't leak.
@@ -346,10 +350,11 @@ class RAGPipeline:
         # P0.11a W2: cache the GOVERNED result keyed by the session's auth scope. The
         # stored chunk_ids are the ADMITTED (non-deny) ids; on a future hit the cache
         # re-governs them for the requester (real _govern_fn) before serving.
+        n_withheld = sum(1 for d in trail if d.decision != "allow")
         if self.cache is not None:
             self.cache.put(question, session,
                            chunk_ids=[sc.chunk.chunk_id for sc in admitted],
-                           answer=answer)
+                           answer=answer, n_withheld=n_withheld)
 
         return RAGResponse(
             query=question,
@@ -360,5 +365,6 @@ class RAGPipeline:
             retrieved=len(candidates),
             admitted=len(admitted),
             blocked=blocked,
+            n_withheld=n_withheld,
             governance_trail=trail,
         )

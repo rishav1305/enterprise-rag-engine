@@ -51,6 +51,7 @@ class _Entry:
     answer: str
     created_at: float
     ttl_seconds: float
+    n_withheld: int = 0   # the GOVERNED withheld count at put-time (deny+mask+partial)
 
     def expired(self, now: float) -> bool:
         return (now - self.created_at) > self.ttl_seconds
@@ -145,6 +146,10 @@ class SemanticCache:
             similarity=best_sim,
             scope_fp=scope_fp,
             regoverned=True,
+            # carry the TRUE withheld count from put-time so a warm /query reports the
+            # same n_withheld as the cold one (the trail is intentionally empty on a
+            # hit — we keep the redaction, just report the stable true count).
+            metadata={"n_withheld": entry.n_withheld},
         )
 
     def _audit_hit(self, session: Session, scope_fp: str, sim: float, n: int) -> None:
@@ -171,8 +176,13 @@ class SemanticCache:
         session: Session,
         chunk_ids: Sequence[str],
         answer: str,
+        n_withheld: int = 0,
     ) -> None:
-        """Store a governed result for ``query`` under ``session``'s scope."""
+        """Store a governed result for ``query`` under ``session``'s scope.
+
+        ``n_withheld`` is the GOVERNED withheld count at put-time (deny+mask+partial);
+        a cache hit returns it so a warm query reports the same count as the cold one.
+        """
         scope_fp = AuthScope.from_session(session).fingerprint()
         self._counter += 1
         key = f"{scope_fp}:{self._counter}"
@@ -184,6 +194,7 @@ class SemanticCache:
             answer=answer,
             created_at=time.monotonic(),
             ttl_seconds=self.ttl_seconds,
+            n_withheld=int(n_withheld),
         )
         self._entries.move_to_end(key)
         self._evict()
