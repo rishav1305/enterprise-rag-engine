@@ -59,6 +59,25 @@ echo "$pj" | grep -q '"personas"' && ok "metadata endpoints serve (synthetic pro
 c=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/query" -H 'content-type: application/json' \
     -H 'X-User-Id: chk-clr' -H 'X-User-Roles: PUBLIC' -H 'X-Clearance: 99' -d '{"question":"hi"}')
 [ "$c" = "422" ] && ok "X-Clearance out-of-range -> 422 (ROBUST, no 500)" || bad "X-Clearance=99 returned $c (expected 422)"
+
+# 4b. G1: /trace returns a parity-correct synthetic trace; a DENIED persona's
+#     result.answer carries no restricted content (the trace IS the engine, redacted).
+tr=$(curl -s -X POST "$URL/trace" -H 'content-type: application/json' \
+  -H 'X-User-Id: chk-trace' -H 'X-User-Roles: INTERN' -H 'X-Clearance: 1' \
+  -d '{"question":"what is the executive compensation schedule"}')
+( echo "$tr" | grep -q '"governance"' && echo "$tr" | grep -q '"query_dissection"' ) \
+  && ok "/trace returns the full Trace shape (dissection+stages+governance+result)" \
+  || bad "/trace missing the Trace shape"
+echo "$tr" | grep -q '"decision": *"deny"' && ok "/trace governance shows a real deny (intern exec-comp)" \
+  || bad "/trace governance has no deny for the intern exec-comp query"
+if echo "$tr" | python3 -c "import sys,json; a=(json.load(sys.stdin).get('result',{}) or {}).get('answer','') or ''; sys.exit(0 if ('480,000' not in a and 'Executive Compensation Schedule' not in a) else 1)" 2>/dev/null; then
+  ok "/trace result.answer carries no restricted content for the denied persona"
+else
+  bad "/trace LEAK: restricted content in the denied persona's result.answer"
+fi
+curl -s "$URL/trace/catalog" | grep -q '"sources"' \
+  && ok "/trace/catalog serves the estate metadata" || bad "/trace/catalog not serving"
+
 # 5. rate-limit is live (LAST — it exhausts the per-key/instance budget): hammer past the per-min cap -> a 429 appears.
 echo "  …probing rate-limit (expect a 429 within ~35 requests)…"
 got429=0
