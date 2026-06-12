@@ -41,17 +41,24 @@ def _demo_catalog():
     from .schemas import SecurityContext
 
     reg = CatalogRegistry()
+    # (asset_id, vertical, class, level, badge, allowed/ntk roles)
     demo_assets = [
-        ("nyc_tlc_trips", "TRANSPORT", "A", 0, "≈1.6B rows · ~400 GB"),
-        ("gdelt_events", "NEWS", "A", 0, "≈800M events · ~250 GB"),
-        ("meridian_warehouse", "FINANCE", "C", 2, "≈40M rows · ~12 GB"),
+        ("nyc_tlc_trips", "TRANSPORT", "A", 0, "≈1.6B rows · ~400 GB", []),
+        ("gdelt_events", "NEWS", "A", 0, "≈800M events · ~250 GB", []),
+        ("meridian_warehouse", "FINANCE", "C", 2, "≈40M rows · ~12 GB", []),
+        # G0: the governing assets for the two new corpus docs (so RAGPipeline.asset_for
+        # resolves them by parent_doc_id; the trace surfaces the governing asset).
+        ("customer-account-sample", "CUSTOMER_SUPPORT", "D", 3,
+         "1 sample record (class-D customer PII)", []),
+        ("dept-scoped-record", "ENGINEERING", "G", 2,
+         "1 sample record (dept-scoped, partial)", ["ENGINEERING"]),
     ]
-    for aid, vert, cls, lvl, badge in demo_assets:
+    for aid, vert, cls, lvl, badge, ntk in demo_assets:
         reg._assets[aid] = CatalogAsset(
             asset_id=aid, vertical=vert, retrieval_mode="structured",
             sensitivity_class=cls, scale_badge=badge,
-            security=SecurityContext(allowed_roles=[], clearance_level=lvl,
-                                     sensitivity_class=cls, need_to_know_roles=[]),
+            security=SecurityContext(allowed_roles=ntk, clearance_level=lvl,
+                                     sensitivity_class=cls, need_to_know_roles=ntk),
         )
     return reg
 

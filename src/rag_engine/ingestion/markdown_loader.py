@@ -23,10 +23,13 @@ from pathlib import Path
 import yaml
 
 from ..config import EngineConfig
+from ..governance.access import _PII_CLASS, _VALID_CLASSES
 from ..schemas import Document, EnrichedChunk, SecurityContext
 from .base import DocumentLoader
 
 _FENCE = "---"
+# PII classes that must declare clearance_level >= 2 (defeat the is_public leg).
+_PII_CLASSES = frozenset({_PII_CLASS})  # class D today; extend if more PII classes added
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -55,11 +58,40 @@ class MarkdownLoader(DocumentLoader):
                     "(allowed_roles / clearance_level). Refusing to ingest "
                     "un-governed content."
                 )
+            # G0 FIX: normalize + VALIDATE the sensitivity class at ingest. Normalize
+            # (strip + upper) auto-fixes a lowercase `d` typo; an empty class is the
+            # legacy un-classed path; ANY OTHER non-empty value is unknown -> REFUSE to
+            # ingest (same fail-closed posture as the un-governed-content guard). This
+            # is the first line; access.evaluate denies an unknown class as a backstop.
+            cls = str(meta.get("sensitivity_class", "") or "").strip().upper()
+            if cls and cls not in _VALID_CLASSES:
+                raise ValueError(
+                    f"{path.name}: unknown sensitivity_class {cls!r} (valid: A-N). "
+                    "Refusing to ingest a mis-classified document."
+                )
+            level = int(meta.get("clearance_level", 0))
+            # G0 FIX5: a class-D / PII doc misconfigured as level-0 PUBLIC would hit the
+            # is_public short-circuit and leak raw PII to anon BEFORE the mask leg runs.
+            # Require PII classes to declare a clearance level that defeats is_public.
+            if cls in _PII_CLASSES and level < 2:
+                raise ValueError(
+                    f"{path.name}: a PII class ({cls}) must declare clearance_level >= 2 "
+                    f"(got {level}) — a level-0 PII doc would leak raw to anon."
+                )
             security = SecurityContext(
                 allowed_roles=meta.get("allowed_roles", []) or ["PUBLIC"],
-                clearance_level=int(meta.get("clearance_level", 0)),
+                clearance_level=level,
                 owner_department=meta.get("owner_department", "UNASSIGNED"),
+                # G0: propagate the sensitivity class + need-to-know so the corpus can
+                # exercise the class-D PII-mask leg and the need-to-know/partial leg of
+                # access.evaluate (not just the legacy level + allowed_roles path).
+                sensitivity_class=cls,
+                need_to_know_roles=meta.get("need_to_know_roles", []) or [],
             )
+            # G0: carry partial_for (the row-scoped-access roles) on the Document
+            # metadata so chunk_document puts it on each chunk — access.evaluate's
+            # partial leg reads chunk.metadata["partial_for"].
+            partial_for = meta.get("partial_for", []) or []
             docs.append(
                 Document(
                     doc_id=meta.get("doc_id", path.stem),
@@ -68,6 +100,7 @@ class MarkdownLoader(DocumentLoader):
                     summary=meta.get("summary", ""),
                     security=security,
                     source_uri=str(path),
+                    metadata={"partial_for": list(partial_for)} if partial_for else {},
                 )
             )
         return docs
@@ -108,6 +141,9 @@ def chunk_document(doc: Document, config: EngineConfig | None = None) -> list[En
             content=text,
             security=doc.security,  # <-- ACL inheritance happens here
             ordinal=i,
+            # G0: chunks inherit the doc's governance metadata (e.g. partial_for) so
+            # access.evaluate's partial leg can read it.
+            metadata=dict(doc.metadata),
         )
         for i, text in enumerate(windows)
     ]
