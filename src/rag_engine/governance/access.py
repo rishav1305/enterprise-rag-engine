@@ -20,6 +20,12 @@ from ..schemas import EnrichedChunk, GovernanceDecision, Session
 # class D (customer PII): mask for L2-L3, raw at L4+, deny below L2.
 _PII_CLASS = "D"
 
+# The canonical Meridian sensitivity classes (A-N). Kept local (no `seeds` import —
+# that pulls heavy seed-gen deps at runtime). The empty string "" means un-classed
+# (the legacy level+allowed_roles path). ANY OTHER non-empty value is unrecognized
+# and DENIED (fail-closed) — a malformed/typo class must never bypass the gates.
+_VALID_CLASSES = frozenset("ABCDEFGHIJKLMN")
+
 
 def evaluate(chunk: EnrichedChunk, session: Session) -> GovernanceDecision:
     sec = chunk.security
@@ -36,6 +42,16 @@ def evaluate(chunk: EnrichedChunk, session: Session) -> GovernanceDecision:
     cls = sec.sensitivity_class
     level = session.clearance_level
     roles = set(session.roles)
+
+    # --- fail-closed on an UNRECOGNIZED class (defense in depth) ----------
+    # The ingestion loader normalizes + rejects bad classes, but anything that reaches
+    # evaluate with a non-empty class that isn't a known A-N class (a typo, a catalog
+    # asset, a seed that skipped the loader) must DENY — never fall through to the
+    # legacy role gate (which is guarded by `not cls`) and out to ALLOW.
+    if cls and cls not in _VALID_CLASSES:
+        return GovernanceDecision(
+            decision="deny", reason=f"unrecognized_sensitivity_class ({cls!r})", **base
+        )
 
     # --- masking leg: customer PII (class D) -----------------------------
     if cls == _PII_CLASS:
