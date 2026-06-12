@@ -59,7 +59,16 @@ class MarkdownLoader(DocumentLoader):
                 allowed_roles=meta.get("allowed_roles", []) or ["PUBLIC"],
                 clearance_level=int(meta.get("clearance_level", 0)),
                 owner_department=meta.get("owner_department", "UNASSIGNED"),
+                # G0: propagate the sensitivity class + need-to-know so the corpus can
+                # exercise the class-D PII-mask leg and the need-to-know/partial leg of
+                # access.evaluate (not just the legacy level + allowed_roles path).
+                sensitivity_class=meta.get("sensitivity_class", "") or "",
+                need_to_know_roles=meta.get("need_to_know_roles", []) or [],
             )
+            # G0: carry partial_for (the row-scoped-access roles) on the Document
+            # metadata so chunk_document puts it on each chunk — access.evaluate's
+            # partial leg reads chunk.metadata["partial_for"].
+            partial_for = meta.get("partial_for", []) or []
             docs.append(
                 Document(
                     doc_id=meta.get("doc_id", path.stem),
@@ -68,6 +77,7 @@ class MarkdownLoader(DocumentLoader):
                     summary=meta.get("summary", ""),
                     security=security,
                     source_uri=str(path),
+                    metadata={"partial_for": list(partial_for)} if partial_for else {},
                 )
             )
         return docs
@@ -108,6 +118,9 @@ def chunk_document(doc: Document, config: EngineConfig | None = None) -> list[En
             content=text,
             security=doc.security,  # <-- ACL inheritance happens here
             ordinal=i,
+            # G0: chunks inherit the doc's governance metadata (e.g. partial_for) so
+            # access.evaluate's partial leg can read it.
+            metadata=dict(doc.metadata),
         )
         for i, text in enumerate(windows)
     ]

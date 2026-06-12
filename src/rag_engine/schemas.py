@@ -81,6 +81,9 @@ class Document(BaseModel):
     security: SecurityContext
     summary: str = ""
     source_uri: str = ""
+    # G0: governance metadata that chunks inherit — e.g. {"partial_for": [roles]} for
+    # the row-scoped (partial) access leg of access.evaluate.
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def content_hash(self) -> str:
